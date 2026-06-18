@@ -26,6 +26,22 @@
 	<string>VoiceDrop 把当前位置（如城市/城区）写进录音文件名，方便日后辨认。可拒绝，录音照常。</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>VoiceDrop 录下你的口述，并上传到你的文件中转站。</string>
+	<key>NSUbiquitousContainers</key>
+	<dict>
+		<key>iCloud.com.wangjianshuo.VoiceDrop</key>
+		<dict>
+			<key>NSUbiquitousContainerIsDocumentScopePublic</key>
+			<true/>
+			<key>NSUbiquitousContainerName</key>
+			<string>VoiceDrop</string>
+			<key>NSUbiquitousContainerSupportedFolderLevels</key>
+			<string>Any</string>
+		</dict>
+	</dict>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+	</array>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>

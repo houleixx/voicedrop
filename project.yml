@@ -25,6 +25,20 @@ targets:
         UILaunchScreen:
           UIColorName: ""
         FILES_TOKEN: $(FILES_TOKEN)
+        NSUbiquitousContainers:
+          iCloud.com.wangjianshuo.VoiceDrop:
+            NSUbiquitousContainerIsDocumentScopePublic: true
+            NSUbiquitousContainerName: VoiceDrop
+            NSUbiquitousContainerSupportedFolderLevels: Any
+    entitlements:
+      path: VoiceDropApp/VoiceDrop.entitlements
+      properties:
+        com.apple.developer.icloud-container-identifiers:
+          - iCloud.com.wangjianshuo.VoiceDrop
+        com.apple.developer.ubiquity-container-identifiers:
+          - iCloud.com.wangjianshuo.VoiceDrop
+        com.apple.developer.icloud-services:
+          - CloudDocuments
     settings:
       base:
         SWIFT_VERSION: "6.0"

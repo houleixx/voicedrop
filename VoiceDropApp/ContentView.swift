@@ -187,6 +187,11 @@ struct ContentView: View {
                 // keep the provisional file — still a valid VoiceDrop-*.m4a upload
             }
         }
+        // Mirror to iCloud Drive before upload (upload deletes the local file on
+        // success). Off the main thread; best-effort.
+        let toArchive = toUpload
+        await Task.detached { ICloudArchive.save(toArchive) }.value
+
         let ok = await uploader.upload(toUpload)
         phase = ok ? .done : .failed(uploader.lastError ?? "上传失败")
     }
