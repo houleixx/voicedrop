@@ -207,8 +207,8 @@ struct ContentView: View {
         let granted = await AudioRecorder.ensurePermission()
         guard granted else { phase = .denied; return }
         location.start()                // best-effort, never blocks recording
-        await drainQueue()              // push up anything left over from last session
-        startRecording()
+        startRecording()                // start immediately — timer moves at once
+        Task { await drainQueue() }     // push up any backlog in the background
     }
 
     private func startRecording() {
