@@ -2,7 +2,7 @@ import Foundation
 import Observation
 
 /// Uploads recordings to jianshuo.dev/files via the R2-backed PUT API.
-/// The Documents directory IS the pending queue: a `rec-*.m4a` file that
+/// The Documents directory IS the pending queue: a `VoiceDrop-*.m4a` file that
 /// still exists has not been uploaded. On success the file is deleted.
 @MainActor
 @Observable
@@ -31,7 +31,7 @@ final class Uploader {
         let files = (try? FileManager.default.contentsOfDirectory(
             at: dir, includingPropertiesForKeys: nil)) ?? []
         return files
-            .filter { $0.lastPathComponent.hasPrefix("rec-") && $0.pathExtension == "m4a" }
+            .filter { $0.lastPathComponent.hasPrefix("VoiceDrop-") && $0.pathExtension == "m4a" }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
     }
 

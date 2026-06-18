@@ -5,7 +5,7 @@
 ## 它做什么
 
 - 打开 App → 自动开始录音（黑底、计时器、一个大停止钮，没别的）。
-- 点停止 → 录音（m4a/AAC）立即 PUT 上传到 `https://jianshuo.dev/files/api/upload/<rec-时间戳.m4a>`。
+- 点停止 → 录音（m4a/AAC）立即 PUT 上传到 `https://jianshuo.dev/files/api/upload/<VoiceDrop-时间戳.m4a>`。
 - 上传成功回到准备录音状态，可马上录下一条。
 - 断网/失败 → 录音留在本地待传队列（右上角显示「↑ N」），下次回前台自动重传。**绝不丢录音。**
 

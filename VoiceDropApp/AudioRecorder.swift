@@ -2,7 +2,7 @@ import Foundation
 import AVFoundation
 import Observation
 
-/// Wraps AVAudioRecorder. Records mono AAC into Documents/rec-<timestamp>.m4a,
+/// Wraps AVAudioRecorder. Records mono AAC into Documents/VoiceDrop-<timestamp>.m4a,
 /// exposes a live elapsed time, and handles audio-session interruptions
 /// (e.g. an incoming call) by finalizing the current recording.
 @MainActor
@@ -129,7 +129,7 @@ final class AudioRecorder {
         let fmt = DateFormatter()
         fmt.locale = Locale(identifier: "en_US_POSIX")
         fmt.dateFormat = "yyyy-MM-dd-HHmmss"
-        let name = "rec-\(fmt.string(from: Date())).m4a"
+        let name = "VoiceDrop-\(fmt.string(from: Date())).m4a"
         return documentsDir.appending(path: name)
     }
 
