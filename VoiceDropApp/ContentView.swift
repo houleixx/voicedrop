@@ -22,10 +22,9 @@ struct ContentView: View {
     @State private var phase: Phase = .requesting
     @State private var idCopied = false
 
-    // Interim: zero-login via an anonymous iCloud-Keychain token. Flip to true
-    // once Sign in with Apple's App ID capability has propagated on Apple's
-    // servers (the SiwA code below stays wired up and ready).
-    private let requireAppleSignIn = false
+    // Sign in with Apple restored (capability has propagated). Set to false to
+    // fall back to the zero-login anonymous iCloud-Keychain token.
+    private let requireAppleSignIn = true
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
