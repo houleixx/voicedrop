@@ -10,6 +10,7 @@ struct LibraryView: View {
 
     @State private var store = LibraryStore()
     @State private var confirmDelete: Recording?
+    @State private var confirmReprocess: Recording?   // easter egg: long-press 已成文
 
     var body: some View {
         NavigationStack {
@@ -54,21 +55,28 @@ struct LibraryView: View {
         .onChange(of: active) { _, nowActive in
             if nowActive { Task { await store.load() } }
         }
-        .confirmationDialog("删除", isPresented: .init(
+        .alert("删除这条录音？", isPresented: .init(
             get: { confirmDelete != nil },
             set: { if !$0 { confirmDelete = nil } }
-        ), titleVisibility: .visible, presenting: confirmDelete) { rec in
-            Button("删除整条录音", role: .destructive) {
+        ), presenting: confirmDelete) { rec in
+            Button("删除", role: .destructive) {
                 Task { await store.delete(rec) }
-            }
-            if rec.hasArticles || rec.isEmpty {
-                Button("只删除文章，下次重新生成", role: .destructive) {
-                    Task { await store.deleteArticle(rec) }
-                }
             }
             Button("取消", role: .cancel) {}
         } message: { _ in
-            Text("「删除整条录音」会连音频一起从云端删除，不可恢复。\n「只删除文章」保留录音、清除已生成的文章和标记，下个周期会重新挖一遍。")
+            Text("音频和已挖出的文章都会从云端删除，不可恢复。")
+        }
+        // Easter egg: long-press the 已成文 badge to scrap the article and re-mine.
+        .alert("重新处理这篇文章？", isPresented: .init(
+            get: { confirmReprocess != nil },
+            set: { if !$0 { confirmReprocess = nil } }
+        ), presenting: confirmReprocess) { rec in
+            Button("删除文章并重新生成", role: .destructive) {
+                Task { await store.deleteArticle(rec) }
+            }
+            Button("取消", role: .cancel) {}
+        } message: { _ in
+            Text("会删掉已生成的文章、保留录音，下个周期重新挖一遍。")
         }
     }
 
@@ -86,6 +94,8 @@ struct LibraryView: View {
                     if rec.hasArticles {
                         Label("已成文", systemImage: "doc.text")
                             .foregroundStyle(.green.opacity(0.85)).font(.caption2)
+                            .contentShape(Rectangle())
+                            .onLongPressGesture { confirmReprocess = rec }
                     } else if rec.isEmpty {
                         Label("无语音", systemImage: "speaker.slash")
                             .foregroundStyle(.white.opacity(0.35)).font(.caption2)
