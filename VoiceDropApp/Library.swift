@@ -38,6 +38,7 @@ struct Recording: Identifiable {
     let uploaded: String
     let hasArticles: Bool
     let isEmpty: Bool            // a `articles/<stem>.empty` marker exists (no usable speech)
+    var articleTitle: String?    // first mined article's title; fills the place slot once 已成文
 
     var id: String { audioName }
     var stem: String { String(audioName.dropLast(4)) }          // strip .m4a
@@ -45,20 +46,25 @@ struct Recording: Identifiable {
     var emptyKey: String { "articles/\(stem).empty" }
     var srtKey: String { "articles/\(stem).srt" }
 
-    /// "6月18日 14:30 · Xuhui" style label parsed from the rich filename;
-    /// falls back to the stem when the name doesn't match.
+    /// "6月18日 14:30 · Xuhui" style label parsed from the rich filename. Once the
+    /// recording is 已成文, the place slot is replaced by the article's title.
+    /// Falls back to the stem when the name doesn't match.
     var displayTitle: String {
         let p = stem.components(separatedBy: "-")
         // VoiceDrop - YYYY - MM - DD - HHMMSS - 0m33s - Thu - Period - City - District
-        guard p.count >= 5, p[0] == "VoiceDrop", p[1].count == 4 else { return stem }
+        guard p.count >= 5, p[0] == "VoiceDrop", p[1].count == 4 else {
+            return articleTitle ?? stem
+        }
         var bits: [String] = []
         if let mo = Int(p[2]), let da = Int(p[3]) { bits.append("\(mo)月\(da)日") }
         if p.count >= 5, p[4].count == 6 {
             let t = p[4]
             bits.append("\(t.prefix(2)):\(t.dropFirst(2).prefix(2))")
         }
+        // Prefer the article title (已成文); otherwise the parsed place.
         let place = p.count >= 10 ? p[9] : (p.count >= 9 ? p[8] : "")
-        if !place.isEmpty { bits.append(place) }
+        let suffix = (articleTitle?.isEmpty == false) ? articleTitle! : place
+        if !suffix.isEmpty { bits.append(suffix) }
         return bits.isEmpty ? stem : bits.joined(separator: " · ")
     }
 
@@ -79,6 +85,7 @@ final class LibraryStore {
 
     private let base = URL(string: "https://jianshuo.dev/files/api")!
     private var token: String { AuthStore.shared.bearer }
+    private var titleCache: [String: String] = [:]   // articleKey -> first article title
 
     private struct ListResponse: Decodable {
         struct Item: Decodable { let name: String; let uploaded: String? }
@@ -110,8 +117,40 @@ final class LibraryStore {
                                  isEmpty: names.contains("articles/\(stem).empty"))
             }
             .sorted { $0.audioName > $1.audioName }   // newest first (timestamped names)
+
+            // Apply cached titles immediately, then fetch any missing ones so the
+            // 已成文 rows show the article title instead of the place.
+            for i in recordings.indices where recordings[i].hasArticles {
+                recordings[i].articleTitle = titleCache[recordings[i].articleKey]
+            }
+            await fetchMissingTitles()
         } catch {
             self.error = error.localizedDescription
+        }
+    }
+
+    /// For every 已成文 recording without a cached title, fetch its doc and grab
+    /// the first article's title (concurrently). Matched back by id so a delete
+    /// mid-fetch can't mis-assign.
+    private func fetchMissingTitles() async {
+        let pending = recordings.filter { $0.hasArticles && $0.articleTitle == nil }
+        guard !pending.isEmpty else { return }
+        let found = await withTaskGroup(of: (String, String).self) { group -> [(String, String)] in
+            for rec in pending {
+                group.addTask {
+                    let title = await self.fetchDoc(rec)?.resolvedArticles.first?.title ?? ""
+                    return (rec.id, title)
+                }
+            }
+            var out: [(String, String)] = []
+            for await pair in group where !pair.1.isEmpty { out.append(pair) }
+            return out
+        }
+        for (id, title) in found {
+            if let idx = recordings.firstIndex(where: { $0.id == id }) {
+                recordings[idx].articleTitle = title
+                titleCache[recordings[idx].articleKey] = title
+            }
         }
     }
 
@@ -170,6 +209,7 @@ final class LibraryStore {
         _ = await del(rec.articleKey)
         _ = await del(rec.srtKey)
         _ = await del(rec.emptyKey)
+        titleCache[rec.articleKey] = nil   // re-mined article may have a new title
         await load()
         return true
     }

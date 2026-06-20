@@ -87,6 +87,7 @@ struct LibraryView: View {
                 .frame(width: 26)
             VStack(alignment: .leading, spacing: 3) {
                 Text(rec.displayTitle).foregroundStyle(.white).font(.callout.weight(.medium))
+                    .lineLimit(1).truncationMode(.tail)
                 HStack(spacing: 8) {
                     if let d = rec.durationLabel {
                         Text(d).foregroundStyle(.white.opacity(0.4)).font(.caption2.monospaced())
