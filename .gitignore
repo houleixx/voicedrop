@@ -16,8 +16,11 @@ xcuserdata/
 # Fastlane
 fastlane/report.xml
 fastlane/Preview.html
-fastlane/screenshots/
 fastlane/test_output/
+# fastlane/screenshots/ IS committed — it's the App Store screenshot set that
+# `fastlane release` uploads. Only frameit's generated extras are ignored.
+fastlane/screenshots/**/*_framed.png
+fastlane/screenshots/**/.frameit
 
 .DS_Store
 
@@ -26,3 +29,6 @@ fastlane/test_output/
 
 # Downloaded VoiceDrop recordings (personal audio — never commit)
 archive/
+
+# Xcode build / fastlane screenshot derived data
+build/

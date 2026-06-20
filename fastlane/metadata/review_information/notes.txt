@@ -1,0 +1,4 @@
+Sign in with Apple is used for an anonymous, zero-PII account. No demo account
+needed — the app works immediately on first launch. Microphone is used for the
+core recording feature; location (optional, can be denied) only tags the
+filename with the current city/district.

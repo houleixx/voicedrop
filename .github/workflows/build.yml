@@ -9,6 +9,15 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      destination:
+        description: 'Where to ship'
+        required: true
+        default: 'testflight'
+        type: choice
+        options:
+          - testflight   # build + upload to TestFlight (same as a push to main)
+          - appstore     # submit the build already on TestFlight to App Store review
 
 jobs:
   build:
@@ -51,7 +60,9 @@ jobs:
             -destination 'generic/platform=iOS' \
             CODE_SIGNING_ALLOWED=NO
 
-      # Push to main → TestFlight
+      # Push to main → TestFlight. Manual "appstore" dispatch → submit for review
+      # (reuses the build already on TestFlight; metadata + screenshots come from
+      # fastlane/metadata + fastlane/screenshots).
       - name: Run fastlane
         if: github.event_name != 'pull_request'
         env:
@@ -60,7 +71,12 @@ jobs:
           ASC_API_KEY_ID:       ${{ secrets.ASC_API_KEY_ID }}
           ASC_API_ISSUER_ID:    ${{ secrets.ASC_API_ISSUER_ID }}
           ASC_API_KEY_CONTENT:  ${{ secrets.ASC_API_KEY_CONTENT }}
-        run: bundle exec fastlane beta
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.destination }}" = "appstore" ]; then
+            bundle exec fastlane release skip_build:true
+          else
+            bundle exec fastlane beta
+          fi
 
       - name: Push tags
         if: success() && github.event_name != 'pull_request'
