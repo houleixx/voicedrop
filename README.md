@@ -25,7 +25,7 @@
 | 部分 | 在哪 | 职责 |
 |---|---|---|
 | **iOS App** | 本 repo `~/code/voicedrop` | 录音 + 上传，仅此 |
-| **文件中转站** | `jianshuo.dev/files`（Cloudflare Pages + R2 桶 `jianshuo-dev-files`，repo `~/code/websites/jianshuo.dev`） | 暂存未处理录音；R2 当「收件箱」 |
+| **文件中转站** | `jianshuo.dev/files`（Cloudflare Pages + R2 桶 `jianshuo-dev-files`，repo `~/code/jianshuo.dev`） | 暂存未处理录音；R2 当「收件箱」 |
 | **挖文章 skill** | `~/.claude/skills/wjs-mining-voicedrop` | 拉收件箱 → 转写 → 成文 → 删；成功才删，没成文不删 |
 
 App 不负责 Mac 端任何自动化——录完上传就结束，处理由用户手动跑 skill。
@@ -125,7 +125,7 @@ skill 自带一个收件箱小工具（也可手动用）：
 
 - **改 App 行为** → 这个 repo。设计的单一事实源是 `docs/superpowers/specs/2026-06-18-voicedrop-design.md`，先读它。
 - **改处理流程 / 收件箱进出** → skill `~/.claude/skills/wjs-mining-voicedrop/`（注意：wjs-* skill 会自动同步到公开 repo，**token 绝不进代码**，运行时从 `~/code/.env` 读）。
-- **改文件中转站本身**（鉴权 / 路由 / R2） → `~/code/websites/jianshuo.dev`，函数在 `functions/files/api/[[path]].js`，Pages 项目名 `jianshuo-dev`。
+- **改文件中转站本身**（鉴权 / 路由 / R2） → `~/code/jianshuo.dev`，函数在 `functions/files/api/[[path]].js`，Pages 项目名 `jianshuo-dev`。
 - **token 在哪** → `~/code/.env` 的 `FILES_TOKEN`，与 Cloudflare Pages secret 同值；轮换见记忆 `jianshuo-dev-files-transfer`。
 - **后台/隔离**：本 repo 是 git 仓库，后台 agent 改代码前先 `EnterWorktree`。
 - **已知坑**：模拟器无麦克风 → 录音恒为 -91dB 静音；`CLGeocoder` 在 iOS 26 标记 deprecated（仍可用，将来可迁 `MKReverseGeocodingRequest`）。
