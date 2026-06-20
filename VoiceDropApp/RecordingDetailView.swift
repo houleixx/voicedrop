@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// One recording: an audio player on top, then a segmented switch between the
 /// subtitle (SRT) and the mined article(s).
@@ -13,6 +14,8 @@ struct RecordingDetailView: View {
     @State private var loadingAudio = false
     @State private var tab = 0                 // 0 = 文章, 1 = 字幕
     @State private var articleIndex = 0
+    @State private var sharing = false
+    @State private var shareLink: IdentifiableURL?
 
     private var articles: [MinedArticle] { doc?.resolvedArticles ?? [] }
 
@@ -51,6 +54,44 @@ struct RecordingDetailView: View {
             loadingDoc = false
         }
         .onDisappear { player.stop() }
+        .sheet(item: $shareLink) { ShareSheet(items: [$0.url]) }
+    }
+
+    // MARK: Share + article rendering
+
+    private var shareButton: some View {
+        Button {
+            Task {
+                sharing = true
+                if let u = await store.shareURL(recording) { shareLink = IdentifiableURL(url: u) }
+                sharing = false
+            }
+        } label: {
+            roundIcon(sharing ? "ellipsis" : "square.and.arrow.up")
+        }
+        .disabled(sharing)
+        .accessibilityLabel("分享文章")
+    }
+
+    private func roundIcon(_ name: String) -> some View {
+        Image(systemName: name)
+            .font(.callout).foregroundStyle(.white)
+            .frame(width: 22, height: 22)
+            .padding(12).background(.white.opacity(0.14), in: Circle())
+    }
+
+    /// Title + body as one styled, selectable AttributedString. Body markdown is
+    /// parsed inline while preserving paragraph breaks.
+    private func articleAttributed(_ a: MinedArticle) -> AttributedString {
+        var title = AttributedString(a.title)
+        title.font = .title3.bold()
+        title.foregroundColor = .white
+        var body = (try? AttributedString(markdown: a.body, options: .init(
+            interpretedSyntax: .inlineOnlyPreservingWhitespace,
+            failurePolicy: .returnPartiallyParsedIfPossible))) ?? AttributedString(a.body)
+        body.font = .body
+        body.foregroundColor = .white.opacity(0.82)
+        return title + AttributedString("\n\n") + body
     }
 
     // MARK: Player
@@ -109,25 +150,23 @@ struct RecordingDetailView: View {
             }
             if let a = articles[safe: articleIndex] {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 14) {
-                        Text(a.title).font(.title3.bold()).foregroundStyle(.white)
-                        ForEach(Array(a.body.components(separatedBy: "\n\n").enumerated()), id: \.offset) { _, para in
-                            Text(.init(para))           // inline markdown
-                                .foregroundStyle(.white.opacity(0.82))
-                                .font(.body).lineSpacing(5)
-                                .textSelection(.enabled)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(20)
+                    // One selectable block (title + body) so a long-press → Select
+                    // All → Copy grabs the whole article, not a single paragraph.
+                    Text(articleAttributed(a))
+                        .lineSpacing(5)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(20)
                 }
                 .overlay(alignment: .bottomTrailing) {
-                    Button {
-                        UIPasteboard.general.string = a.title + "\n\n" + a.body
-                    } label: {
-                        Image(systemName: "doc.on.doc")
-                            .font(.callout).foregroundStyle(.white)
-                            .padding(12).background(.white.opacity(0.14), in: Circle())
+                    HStack(spacing: 12) {
+                        shareButton
+                        Button {
+                            UIPasteboard.general.string = a.title + "\n\n" + a.body
+                        } label: {
+                            roundIcon("doc.on.doc")
+                        }
+                        .accessibilityLabel("拷贝全文")
                     }
                     .padding(18)
                 }
@@ -181,4 +220,16 @@ struct RecordingDetailView: View {
 
 private extension Array {
     subscript(safe i: Int) -> Element? { indices.contains(i) ? self[i] : nil }
+}
+
+/// Wraps a URL so it can drive `.sheet(item:)`.
+struct IdentifiableURL: Identifiable { let url: URL; var id: String { url.absoluteString } }
+
+/// The system share sheet (UIActivityViewController) for SwiftUI.
+struct ShareSheet: UIViewControllerRepresentable {
+    let items: [Any]
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+    func updateUIViewController(_ vc: UIActivityViewController, context: Context) {}
 }

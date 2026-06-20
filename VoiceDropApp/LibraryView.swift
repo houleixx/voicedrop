@@ -34,6 +34,7 @@ struct LibraryView: View {
                             } label: {
                                 Label("删除", systemImage: "trash")
                             }
+                            .tint(.red)   // the TabView's .tint(.white) would otherwise override the destructive red
                         }
                     }
                     .listStyle(.plain)

@@ -175,6 +175,21 @@ final class LibraryStore {
         } catch { return false }
     }
 
+    /// Mint a public share link for this recording's article(s). The server signs
+    /// the article key and returns a `jianshuo.dev/voicedrop/<token>` URL anyone
+    /// can open. Returns nil if not mined yet or the request fails.
+    func shareURL(_ rec: Recording) async -> URL? {
+        guard !token.isEmpty, rec.hasArticles else { return nil }
+        struct Resp: Decodable { let url: String }
+        var req = URLRequest(url: base.appending(path: "share").appending(path: rec.articleKey))
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        do {
+            let (data, resp) = try await URLSession.shared.data(for: req)
+            guard (resp as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) == true else { return nil }
+            return URL(string: try JSONDecoder().decode(Resp.self, from: data).url)
+        } catch { return nil }
+    }
+
     /// Download the audio to a temp file for local playback.
     func downloadAudio(_ rec: Recording) async -> URL? {
         do {
