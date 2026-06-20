@@ -19,6 +19,13 @@ on:
           - testflight   # build + upload to TestFlight (same as a push to main)
           - appstore     # submit the build already on TestFlight to App Store review
 
+# Serialize all builds: two parallel runs would each compute
+# latest_testflight_build_number + 1 and collide on the same build number.
+# cancel-in-progress: false → queue rather than kill an in-flight upload/submit.
+concurrency:
+  group: build
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: macos-15
