@@ -14,6 +14,9 @@ struct RootView: View {
                 // pulls fresh data from the server each time you switch to it.
                 LibraryView(active: selection == 1)
             }
+            Tab("设置", systemImage: "gearshape", value: 2) {
+                SettingsView(active: selection == 2)
+            }
         }
         .tint(.white)
         .preferredColorScheme(.dark)
