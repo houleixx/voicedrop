@@ -114,6 +114,19 @@ def empty_key_for(audio_key):
     return f"{prefix}articles/{stem}.empty"
 
 
+def fetch_claude_md(audio_key):
+    """The recording owner's per-user CLAUDE.md (<prefix>CLAUDE.md), set in the
+    app's Settings tab — name + style. Appended to the mining prompt. '' if none."""
+    parts = audio_key.rsplit("/", 1)
+    prefix = parts[0] + "/" if len(parts) == 2 else ""
+    try:
+        raw = _req("GET", f"{BASE}/download/{quote(prefix + 'CLAUDE.md')}",
+                   headers={"Authorization": f"Bearer {TOKEN}"})
+        return raw.decode("utf-8", "replace").strip()
+    except Exception:
+        return ""
+
+
 def probe_duration(path):
     """Seconds of decodable audio, or None if the file won't probe (corrupt /
     missing moov atom / 0-byte)."""
@@ -194,11 +207,14 @@ def _parse_llm_json(text):
     return json.loads(text)
 
 
-def generate_articles(transcript):
+def generate_articles(transcript, claude_md=""):
     """Return a list of {title, body}. Balanced split: usually 1, more only on
-    clearly distinct topics. Falls back to a single article on parse failure."""
+    clearly distinct topics. Falls back to a single article on parse failure.
+    The owner's CLAUDE.md (name + style), if any, is appended after the system
+    prompt so the articles come out in their own voice."""
+    system = SYSTEM if not claude_md else f"{SYSTEM}\n\n---\n\n{claude_md}"
     payload = {
-        "model": MODEL, "max_tokens": 8000, "system": SYSTEM,
+        "model": MODEL, "max_tokens": 8000, "system": system,
         "messages": [{"role": "user", "content": f"口述转写：\n\n{transcript}"}],
     }
     raw = _req("POST", "https://api.anthropic.com/v1/messages",
@@ -283,8 +299,11 @@ def main():
                     log(f"   ✗ no-speech → marked 无语音 (total {time.time()-rec_t0:.1f}s)")
                     continue
 
+                claude_md = fetch_claude_md(audio)
+                if claude_md:
+                    log(f"   + CLAUDE.md ({len(claude_md)} chars)")
                 t = time.time()
-                articles = generate_articles(transcript)
+                articles = generate_articles(transcript, claude_md)
                 llm = time.time() - t; tot_llm += llm
                 log(f"   Claude mine → {len(articles)} article(s) ({llm:.1f}s)")
 
