@@ -233,13 +233,13 @@ def generate_articles(transcript, claude_md=""):
     clearly distinct topics. Falls back to a single article on parse failure.
     The owner's CLAUDE.md (name + style), if any, is appended after the system
     prompt so the articles come out in their own voice."""
+    # NB: claude-sonnet-4-6 rejects assistant-message prefill, so we force valid
+    # JSON purely by robust extraction of the reply (handles ``` fences + a stray
+    # leading 'json'), and never store raw text as a body.
     system = SYSTEM if not claude_md else f"{SYSTEM}\n\n---\n\n{claude_md}"
     payload = {
         "model": MODEL, "max_tokens": 8000, "system": system,
-        "messages": [
-            {"role": "user", "content": f"口述转写：\n\n{transcript}"},
-            {"role": "assistant", "content": "{"},   # prefill → force a JSON object, no prose/fences
-        ],
+        "messages": [{"role": "user", "content": f"口述转写：\n\n{transcript}"}],
     }
     raw = _req("POST", "https://api.anthropic.com/v1/messages",
                data=json.dumps(payload).encode(),
@@ -248,12 +248,9 @@ def generate_articles(transcript, claude_md=""):
     resp = json.loads(raw)
     text = "".join(b.get("text", "") for b in resp.get("content", [])
                    if b.get("type") == "text")
-    # The reply continues the prefilled "{"; also try it raw in case the model
-    # echoed a full object or wrapped it in a fence.
-    for candidate in ("{" + text, text):
-        arts = _articles_from(candidate)
-        if arts:
-            return arts
+    arts = _articles_from(text)
+    if arts:
+        return arts
     # Never store raw model text as an article body — retry next cycle instead.
     raise RuntimeError("LLM did not return parseable article JSON")
 
