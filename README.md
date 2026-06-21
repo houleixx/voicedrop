@@ -1,38 +1,12 @@
 # VoiceDrop
 
-**打开即录音，停止即自动上传——一个口述捕捉器。** 录下来的音频进入 `jianshuo.dev/files`（R2 收件箱），之后在 Mac 上跑 `/wjs-mining-voicedrop` 自动转写并挖成微信公众号草稿。
+**打开即录音，停止即自动上传——一个口述捕捉器。** 录下来的音频进入 `jianshuo.dev/files`（R2 收件箱）。
 
-这个 repo 只装 **iOS App**；Mac 端的处理是一个独立 skill（见下「端到端闭环」）。
-
----
-
-## 端到端闭环
-
-```
-┌─────────────┐   PUT m4a    ┌──────────────────────┐   pull/del   ┌──────────────────────────┐
-│ iPhone App  │ ───────────▶ │ jianshuo.dev/files   │ ◀──────────▶ │ Mac: /wjs-mining-voicedrop│
-│ (本 repo)   │   带富文件名  │ R2 桶 = 收件箱        │   收件箱进出  │  转写 → 挖文章 → 微信草稿  │
-└─────────────┘              └──────────────────────┘              └──────────────────────────┘
-   开口即录                    未处理录音暂存于此                      ↓ 复用两个 skill
-   停即上传                    (单文件 ≤100MB)              wjs-transcribing-audio (火山豆包 → SRT)
-                                                          wjs-mining-articles    (SRT → 草稿)
-                                                                    ↓ 落
-                                                            ~/code/wechat-publish/
-```
-
-**三个独立部分，各自有边界：**
-
-| 部分 | 在哪 | 职责 |
-|---|---|---|
-| **iOS App** | 本 repo `~/code/voicedrop` | 录音 + 上传，仅此 |
-| **文件中转站** | `jianshuo.dev/files`（Cloudflare Pages + R2 桶 `jianshuo-dev-files`，repo `~/code/jianshuo.dev`） | 暂存未处理录音；R2 当「收件箱」 |
-| **挖文章 skill** | `~/.claude/skills/wjs-mining-voicedrop` | 拉收件箱 → 转写 → 成文 → 删；成功才删，没成文不删 |
-
-App 不负责 Mac 端任何自动化——录完上传就结束，处理由用户手动跑 skill。
+这个 repo 只装 **iOS App**。
 
 ---
 
-## 1. iOS App（本 repo）
+## iOS App（本 repo）
 
 ### 行为
 
@@ -99,32 +73,9 @@ open VoiceDrop.xcodeproj                 # 数据线连真机直接 Run（最简
 
 ---
 
-## 2. 处理录音（Mac 端）
-
-在 Mac 上跑 skill 把收件箱里的录音变成草稿：
-
-```
-/wjs-mining-voicedrop
-```
-
-它做：列收件箱（`VoiceDrop-*.m4a`）→ 对每条**串行**地下载存档(`~/code/voicedrop/archive/`) → 转写(火山豆包) → 交 `wjs-mining-articles` 出选题清单(人工勾选)→ 成文 → 建微信草稿 → **成功才从 R2 删**。
-
-**删除安全红线**：`download(存档) → transcribe → mine → 出了草稿 → 才 delete`。任何一步失败/没勾选/没成文 → 不删，留收件箱下次再来。先存档后删，音频永不丢。
-
-skill 自带一个收件箱小工具（也可手动用）：
-
-```bash
-~/.claude/skills/wjs-mining-voicedrop/scripts/voicedrop-inbox.sh list           # 列未处理
-~/.claude/skills/wjs-mining-voicedrop/scripts/voicedrop-inbox.sh download <name> <dir>
-~/.claude/skills/wjs-mining-voicedrop/scripts/voicedrop-inbox.sh delete <name>   # 仅成功后
-```
-
----
-
 ## 给未来 agent 的指北
 
 - **改 App 行为** → 这个 repo。设计的单一事实源是 `docs/superpowers/specs/2026-06-18-voicedrop-design.md`，先读它。
-- **改处理流程 / 收件箱进出** → skill `~/.claude/skills/wjs-mining-voicedrop/`（注意：wjs-* skill 会自动同步到公开 repo，**token 绝不进代码**，运行时从 `~/code/.env` 读）。
 - **改文件中转站本身**（鉴权 / 路由 / R2） → `~/code/jianshuo.dev`，函数在 `functions/files/api/[[path]].js`，Pages 项目名 `jianshuo-dev`。
 - **token 在哪** → `~/code/.env` 的 `FILES_TOKEN`，与 Cloudflare Pages secret 同值；轮换见记忆 `jianshuo-dev-files-transfer`。
 - **后台/隔离**：本 repo 是 git 仓库，后台 agent 改代码前先 `EnterWorktree`。
