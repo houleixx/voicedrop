@@ -40,6 +40,10 @@ DRY = bool(os.environ.get("MINE_DRY"))
 # (not retried forever). Env-overridable.
 MIN_CHARS = int(os.environ.get("MINE_MIN_CHARS", "20"))
 HERE = os.path.dirname(os.path.abspath(__file__))
+# HTTP proxy for WeChat API calls — must be the Tokyo VPS whitelisted on the
+# WeChat account (66.42.45.128). GitHub Actions IPs are not in the whitelist
+# and get errcode 40164 without this. Set WECHAT_PROXY in repo secrets.
+WECHAT_PROXY = os.environ.get("WECHAT_PROXY", "")
 
 # Balanced split: 1+ standalone articles, one per *clearly distinct* topic,
 # leaning to fewer/meatier pieces — not one-per-paragraph. Each article obeys
@@ -71,12 +75,30 @@ SYSTEM = """你是这段录音的录制者，在写自己的公众号文章。�
 # proxy, so this is correct everywhere.
 _OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
+# Separate opener for WeChat API — must route through the Tokyo VPS whose IP
+# is whitelisted on the WeChat account. WECHAT_PROXY must be set as a GitHub
+# Actions secret (e.g. http://user:pass@66.42.45.128:8888).
+if WECHAT_PROXY:
+    _WECHAT_OPENER = urllib.request.build_opener(
+        urllib.request.ProxyHandler({"http": WECHAT_PROXY, "https": WECHAT_PROXY})
+    )
+else:
+    _WECHAT_OPENER = _OPENER  # no proxy — will hit 40164 if IP not whitelisted
+
 
 def _req(method, url, data=None, headers=None):
     h = dict(headers or {})
     h.setdefault("User-Agent", "voicedrop-miner/2")
     req = urllib.request.Request(url, data=data, method=method, headers=h)
     with _OPENER.open(req, timeout=300) as r:
+        return r.read()
+
+
+def _wechat_req(method, url, data=None, headers=None):
+    h = dict(headers or {})
+    h.setdefault("User-Agent", "voicedrop-miner/2")
+    req = urllib.request.Request(url, data=data, method=method, headers=h)
+    with _WECHAT_OPENER.open(req, timeout=60) as r:
         return r.read()
 
 
@@ -135,9 +157,9 @@ def fetch_wechat_config(audio_key):
 
 
 def wechat_access_token(appid, secret):
-    raw = _req("GET",
-               f"https://api.weixin.qq.com/cgi-bin/token"
-               f"?grant_type=client_credential&appid={appid}&secret={secret}")
+    raw = _wechat_req("GET",
+                      f"https://api.weixin.qq.com/cgi-bin/token"
+                      f"?grant_type=client_credential&appid={appid}&secret={secret}")
     data = json.loads(raw)
     if "access_token" not in data:
         raise RuntimeError(f"WeChat token error: {data}")
@@ -206,10 +228,10 @@ def create_wechat_draft(access_token, title, body_md):
             "only_fans_can_comment": 0,
         }]
     }
-    raw = _req("POST",
-               f"https://api.weixin.qq.com/cgi-bin/draft/add?access_token={access_token}",
-               data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-               headers={"Content-Type": "application/json; charset=utf-8"})
+    raw = _wechat_req("POST",
+                      f"https://api.weixin.qq.com/cgi-bin/draft/add?access_token={access_token}",
+                      data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                      headers={"Content-Type": "application/json; charset=utf-8"})
     data = json.loads(raw)
     if data.get("errcode") and data["errcode"] != 0:
         raise RuntimeError(f"WeChat draft error: {data}")

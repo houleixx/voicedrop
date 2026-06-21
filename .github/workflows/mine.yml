@@ -28,3 +28,4 @@ jobs:
           CLAUDE_API_KEY:        ${{ secrets.CLAUDE_API_KEY }}
           VOLC_ASR_APPID:        ${{ secrets.VOLC_ASR_APPID }}
           VOLC_ASR_ACCESS_TOKEN: ${{ secrets.VOLC_ASR_ACCESS_TOKEN }}
+          WECHAT_PROXY:          ${{ secrets.WECHAT_PROXY }}
