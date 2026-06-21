@@ -52,6 +52,17 @@ final class SettingsStore {
         } catch { self.error = error.localizedDescription }
     }
 
+    func articlesPageURL() async -> URL? {
+        guard !token.isEmpty else { return nil }
+        var req = URLRequest(url: base.appending(path: "token").appending(path: "articles"))
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+              (resp as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) == true,
+              let obj = try? JSONDecoder().decode([String: String].self, from: data),
+              let urlStr = obj["url"] else { return nil }
+        return URL(string: urlStr)
+    }
+
     func save() async {
         guard !token.isEmpty else { error = "请先登录"; return }
         saving = true; saved = false; error = nil
@@ -77,6 +88,8 @@ struct SettingsView: View {
     @State private var draftStyle = ""
     @State private var idCopied = false
     @State private var tokenCopied = false
+    @State private var fetchingArticlesLink = false
+    @Environment(\.openURL) private var openURL
 
     private var anonId: String { AuthStore.shared.anonId }
     private var anonToken: String { AuthStore.shared.anonToken }
@@ -128,6 +141,37 @@ struct SettingsView: View {
                                 }
                             }
                             Text("ID 是你在服务器上的文件夹名（可分享）；访问令牌是私密的，用于 jianshuo.dev/files 或 curl。")
+                                .font(.caption).foregroundStyle(.white.opacity(0.4))
+                        }
+                    }
+
+                    Divider().overlay(Color.white.opacity(0.08)).padding(.vertical, 6)
+
+                    field(title: "我的文章") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Button {
+                                guard !fetchingArticlesLink else { return }
+                                Task {
+                                    fetchingArticlesLink = true
+                                    defer { fetchingArticlesLink = false }
+                                    if let url = await store.articlesPageURL() { openURL(url) }
+                                }
+                            } label: {
+                                HStack {
+                                    Image(systemName: "doc.text")
+                                    Text("查看全部文章")
+                                    Spacer()
+                                    if fetchingArticlesLink {
+                                        ProgressView().tint(.white.opacity(0.6)).scaleEffect(0.8)
+                                    } else {
+                                        Image(systemName: "arrow.up.right").font(.footnote)
+                                    }
+                                }
+                                .font(.callout).foregroundStyle(.white.opacity(0.85))
+                                .padding(12)
+                                .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+                            }
+                            Text("生成一个 24 小时有效的临时链接，在浏览器里浏览你所有成文的录音。")
                                 .font(.caption).foregroundStyle(.white.opacity(0.4))
                         }
                     }
