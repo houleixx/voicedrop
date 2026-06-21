@@ -21,7 +21,7 @@ Env:
   MINE_MODEL             optional, default claude-sonnet-4-6
   MINE_DRY               if set, list what WOULD be mined and exit (no ASR/LLM)
 """
-import os, sys, json, time, subprocess, tempfile, urllib.request
+import os, re, sys, json, time, subprocess, tempfile, urllib.request
 from urllib.parse import quote
 
 
@@ -117,6 +117,103 @@ def empty_key_for(audio_key):
     stem = parts[-1][:-4]
     prefix = parts[0] + "/" if len(parts) == 2 else ""
     return f"{prefix}articles/{stem}.empty"
+
+
+def fetch_wechat_config(audio_key):
+    """Returns {'appid': ..., 'secret': ...} from the user's WECHAT.json, or None."""
+    parts = audio_key.rsplit("/", 1)
+    prefix = parts[0] + "/" if len(parts) == 2 else ""
+    try:
+        raw = _req("GET", f"{BASE}/download/{quote(prefix + 'WECHAT.json')}",
+                   headers={"Authorization": f"Bearer {TOKEN}"})
+        cfg = json.loads(raw)
+        if cfg.get("appid") and cfg.get("secret"):
+            return cfg
+    except Exception:
+        pass
+    return None
+
+
+def wechat_access_token(appid, secret):
+    raw = _req("GET",
+               f"https://api.weixin.qq.com/cgi-bin/token"
+               f"?grant_type=client_credential&appid={appid}&secret={secret}")
+    data = json.loads(raw)
+    if "access_token" not in data:
+        raise RuntimeError(f"WeChat token error: {data}")
+    return data["access_token"]
+
+
+def _inline_md(text):
+    text = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', text)
+    text = re.sub(r'__(.+?)__', r'<strong>\1</strong>', text)
+    text = re.sub(r'\*(.+?)\*', r'<em>\1</em>', text)
+    text = re.sub(r'`(.+?)`',
+                  r'<code style="background:#f5f5f5;padding:.1em .3em;border-radius:3px">\1</code>', text)
+    return text
+
+
+def md_to_wechat_html(md):
+    """Convert markdown to basic WeChat-compatible HTML with inline styles."""
+    lines = md.split('\n')
+    parts = []
+    list_tag = None  # 'ul' or 'ol'
+    for line in lines:
+        if re.match(r'^#{1,6}\s', line):
+            if list_tag:
+                parts.append(f'</{list_tag}>')
+                list_tag = None
+            level = len(line) - len(line.lstrip('#'))
+            text = _inline_md(line.lstrip('#').strip())
+            size = {1: '1.5em', 2: '1.3em', 3: '1.1em'}.get(level, '1em')
+            parts.append(f'<h{level} style="font-size:{size};font-weight:bold;margin:1em 0 .5em">{text}</h{level}>')
+        elif re.match(r'^[-*]\s', line):
+            if list_tag != 'ul':
+                if list_tag:
+                    parts.append(f'</{list_tag}>')
+                parts.append('<ul style="padding-left:2em;margin:.5em 0">')
+                list_tag = 'ul'
+            parts.append(f'<li style="margin:.3em 0">{_inline_md(line[2:].strip())}</li>')
+        elif re.match(r'^\d+\.\s', line):
+            if list_tag != 'ol':
+                if list_tag:
+                    parts.append(f'</{list_tag}>')
+                parts.append('<ol style="padding-left:2em;margin:.5em 0">')
+                list_tag = 'ol'
+            parts.append(f'<li style="margin:.3em 0">{_inline_md(re.sub(r"^\d+\.\s*", "", line).strip())}</li>')
+        elif not line.strip():
+            if list_tag:
+                parts.append(f'</{list_tag}>')
+                list_tag = None
+        else:
+            if list_tag:
+                parts.append(f'</{list_tag}>')
+                list_tag = None
+            parts.append(f'<p style="margin:.8em 0;line-height:1.8">{_inline_md(line)}</p>')
+    if list_tag:
+        parts.append(f'</{list_tag}>')
+    return '\n'.join(parts)
+
+
+def create_wechat_draft(access_token, title, body_md):
+    """Create a WeChat draft and return its media_id."""
+    content_html = md_to_wechat_html(body_md)
+    payload = {
+        "articles": [{
+            "title": title,
+            "content": content_html,
+            "need_open_comment": 0,
+            "only_fans_can_comment": 0,
+        }]
+    }
+    raw = _req("POST",
+               f"https://api.weixin.qq.com/cgi-bin/draft/add?access_token={access_token}",
+               data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+               headers={"Content-Type": "application/json; charset=utf-8"})
+    data = json.loads(raw)
+    if data.get("errcode") and data["errcode"] != 0:
+        raise RuntimeError(f"WeChat draft error: {data}")
+    return data.get("media_id", "")
 
 
 def fetch_claude_md(audio_key):
@@ -373,6 +470,24 @@ def main():
                 mined += 1
                 titles = " | ".join(a["title"] for a in articles)
                 log(f"   ✓ {len(articles)} article(s): {titles} (total {time.time()-rec_t0:.1f}s)")
+
+                # Push WeChat drafts if the user has credentials stored.
+                wechat_cfg = fetch_wechat_config(audio)
+                if wechat_cfg:
+                    try:
+                        wx_token = wechat_access_token(wechat_cfg["appid"], wechat_cfg["secret"])
+                        media_ids = []
+                        for a in articles:
+                            mid = create_wechat_draft(wx_token, a["title"], a["body"])
+                            media_ids.append(mid)
+                            log(f"   📩 WeChat draft: {a['title']} → {mid}")
+                        # Persist media_ids back into the article JSON so we don't re-publish.
+                        for a, mid in zip(art["articles"], media_ids):
+                            a["wechatMediaId"] = mid
+                        api_put(json_key, json.dumps(art, ensure_ascii=False).encode(),
+                                "application/json")
+                    except Exception as wx_err:
+                        log(f"   ⚠ WeChat draft failed: {wx_err}")
         except Exception as e:
             log(f"   FAILED {leaf}: {e}")
             print(f"  FAILED {audio}: {e}", file=sys.stderr)

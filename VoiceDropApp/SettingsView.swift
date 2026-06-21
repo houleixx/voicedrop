@@ -14,6 +14,13 @@ final class SettingsStore {
     var saved = false
     var error: String?
 
+    // WeChat public account credentials — stored as users/<sub>/WECHAT.json
+    var wechatAppId = ""
+    var wechatSecret = ""
+    var savingWechat = false
+    var savedWechat = false
+    var wechatError: String?
+
     private let base = URL(string: "https://jianshuo.dev/files/api")!
     private var token: String { AuthStore.shared.bearer }
 
@@ -79,6 +86,42 @@ final class SettingsStore {
             saved = true
         } catch { self.error = error.localizedDescription }
     }
+
+    func loadWechat() async {
+        guard !token.isEmpty else { return }
+        var req = URLRequest(url: base.appending(path: "download").appending(path: "WECHAT.json"))
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        do {
+            let (data, resp) = try await URLSession.shared.data(for: req)
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            if code == 404 { return }
+            guard (200..<300).contains(code) else { return }
+            if let obj = try? JSONDecoder().decode([String: String].self, from: data) {
+                wechatAppId = obj["appid"] ?? ""
+                wechatSecret = obj["secret"] ?? ""
+            }
+        } catch {}
+    }
+
+    func saveWechat() async {
+        guard !token.isEmpty else { wechatError = "请先登录"; return }
+        savingWechat = true; savedWechat = false; wechatError = nil
+        defer { savingWechat = false }
+        let payload = ["appid": wechatAppId.trimmingCharacters(in: .whitespacesAndNewlines),
+                       "secret": wechatSecret.trimmingCharacters(in: .whitespacesAndNewlines)]
+        guard let body = try? JSONEncoder().encode(payload) else { wechatError = "编码失败"; return }
+        var req = URLRequest(url: base.appending(path: "upload").appending(path: "WECHAT.json"))
+        req.httpMethod = "PUT"
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
+        do {
+            let (_, resp) = try await URLSession.shared.upload(for: req, from: body)
+            guard (resp as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) == true else {
+                wechatError = "保存失败"; return
+            }
+            savedWechat = true
+        } catch { wechatError = error.localizedDescription }
+    }
 }
 
 struct SettingsView: View {
@@ -125,6 +168,50 @@ struct SettingsView: View {
                             }
                             Text("把蒸馏出来的文风文本贴进来。服务器挖文章时会带上它，让文章更像你。")
                                 .font(.caption).foregroundStyle(.white.opacity(0.4))
+                        }
+                    }
+
+                    Divider().overlay(Color.white.opacity(0.08)).padding(.vertical, 6)
+
+                    field(title: "微信公众号") {
+                        VStack(alignment: .leading, spacing: 10) {
+                            TextField("AppID（wx...）", text: $store.wechatAppId)
+                                .textFieldStyle(.plain)
+                                .submitLabel(.next)
+                                .autocorrectionDisabled()
+                                .textInputAutocapitalization(.never)
+                                .foregroundStyle(.white)
+                                .padding(12)
+                                .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+                            SecureField("AppSecret", text: $store.wechatSecret)
+                                .textFieldStyle(.plain)
+                                .submitLabel(.done)
+                                .foregroundStyle(.white)
+                                .padding(12)
+                                .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+                            Button {
+                                Task { await store.saveWechat() }
+                            } label: {
+                                HStack {
+                                    if store.savingWechat {
+                                        ProgressView().tint(.white).scaleEffect(0.8)
+                                    } else if store.savedWechat {
+                                        Image(systemName: "checkmark").font(.caption)
+                                    }
+                                    Text(store.savedWechat ? "已保存" : "保存公众号凭据")
+                                }
+                                .font(.callout).foregroundStyle(.white.opacity(0.85))
+                                .padding(12)
+                                .frame(maxWidth: .infinity)
+                                .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                            }
+                            .disabled(store.savingWechat || store.wechatAppId.isEmpty || store.wechatSecret.isEmpty)
+                            if let e = store.wechatError {
+                                Text(e).font(.caption).foregroundStyle(.orange)
+                            } else {
+                                Text("设置后，每次挖出新文章都会自动推送微信公众号草稿。")
+                                    .font(.caption).foregroundStyle(.white.opacity(0.4))
+                            }
                         }
                     }
 
@@ -219,8 +306,8 @@ struct SettingsView: View {
             .onChange(of: store.style) { _, _ in store.saved = false }
         }
         .preferredColorScheme(.dark)
-        .task { await store.load() }
-        .onChange(of: active) { _, now in if now { Task { await store.load() } } }
+        .task { await store.load(); await store.loadWechat() }
+        .onChange(of: active) { _, now in if now { Task { await store.load(); await store.loadWechat() } } }
         .sheet(isPresented: $editingStyle) { styleEditor }
     }
 
