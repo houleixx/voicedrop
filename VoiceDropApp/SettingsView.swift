@@ -135,6 +135,26 @@ struct SettingsView: View {
                     Divider().overlay(Color.white.opacity(0.08)).padding(.vertical, 6)
 
                     TokenSection()
+
+                    Divider().overlay(Color.white.opacity(0.08)).padding(.vertical, 6)
+
+                    field(title: "给 Agent 用") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Link(destination: URL(string: "https://jianshuo.dev/voicedrop/agent")!) {
+                                HStack {
+                                    Image(systemName: "terminal")
+                                    Text("在 Claude Code / Codex 里用 VoiceDrop")
+                                    Spacer()
+                                    Image(systemName: "arrow.up.right").font(.footnote)
+                                }
+                                .font(.callout).foregroundStyle(.white.opacity(0.85))
+                                .padding(12)
+                                .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+                            }
+                            Text("VoiceDrop 为 Agent 而生 —— 你的录音和文章都能通过开放 API 直接被 agent 读写。")
+                                .font(.caption).foregroundStyle(.white.opacity(0.4))
+                        }
+                    }
                 }
                 .padding(20)
             }
