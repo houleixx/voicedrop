@@ -89,7 +89,7 @@ struct SettingsView: View {
     @State private var idCopied = false
     @State private var tokenCopied = false
     @State private var fetchingArticlesLink = false
-    @Environment(\.openURL) private var openURL
+    @State private var articlesLinkError = false
 
     private var anonId: String { AuthStore.shared.anonId }
     private var anonToken: String { AuthStore.shared.anonToken }
@@ -151,10 +151,15 @@ struct SettingsView: View {
                         VStack(alignment: .leading, spacing: 8) {
                             Button {
                                 guard !fetchingArticlesLink else { return }
+                                articlesLinkError = false
                                 Task {
                                     fetchingArticlesLink = true
                                     defer { fetchingArticlesLink = false }
-                                    if let url = await store.articlesPageURL() { openURL(url) }
+                                    if let url = await store.articlesPageURL() {
+                                        await UIApplication.shared.open(url)
+                                    } else {
+                                        articlesLinkError = true
+                                    }
                                 }
                             } label: {
                                 HStack {
@@ -171,8 +176,13 @@ struct SettingsView: View {
                                 .padding(12)
                                 .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
                             }
-                            Text("生成一个 24 小时有效的临时链接，在浏览器里浏览你所有成文的录音。")
-                                .font(.caption).foregroundStyle(.white.opacity(0.4))
+                            if articlesLinkError {
+                                Text("生成链接失败，请检查网络后重试。")
+                                    .font(.caption).foregroundStyle(.orange)
+                            } else {
+                                Text("生成一个 24 小时有效的临时链接，在浏览器里浏览你所有成文的录音。")
+                                    .font(.caption).foregroundStyle(.white.opacity(0.4))
+                            }
                         }
                     }
 
