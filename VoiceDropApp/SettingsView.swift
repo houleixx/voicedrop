@@ -80,8 +80,9 @@ final class SettingsStore {
             let body = String(String(decoding: data, as: UTF8.self).prefix(80))
             throw ArticlesLinkError.http(code, body)
         }
-        guard let obj = try? JSONDecoder().decode([String: String].self, from: data),
-              let urlStr = obj["url"], let url = URL(string: urlStr) else {
+        struct Resp: Decodable { let url: String }
+        guard let obj = try? JSONDecoder().decode(Resp.self, from: data),
+              let url = URL(string: obj.url) else {
             throw ArticlesLinkError.badResponse
         }
         return url
