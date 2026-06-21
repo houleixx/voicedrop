@@ -2,6 +2,17 @@ import SwiftUI
 import Observation
 import UIKit
 
+private enum ArticlesLinkError: LocalizedError {
+    case unauthenticated, http(Int, String), badResponse
+    var errorDescription: String? {
+        switch self {
+        case .unauthenticated: return "未登录"
+        case .http(let code, let body): return "HTTP \(code): \(body)"
+        case .badResponse: return "响应格式错误"
+        }
+    }
+}
+
 /// Per-user writing identity, stored on the server as users/<sub>/CLAUDE.md and
 /// appended to the article-mining prompt. Single source of truth = that one file.
 @MainActor
@@ -59,25 +70,21 @@ final class SettingsStore {
         } catch { self.error = error.localizedDescription }
     }
 
-    func articlesPageURL() async -> Result<URL, String> {
-        guard !token.isEmpty else { return .failure("未登录") }
+    func articlesPageURL() async throws -> URL {
+        guard !token.isEmpty else { throw ArticlesLinkError.unauthenticated }
         var req = URLRequest(url: base.appending(path: "token").appending(path: "articles"))
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        do {
-            let (data, resp) = try await URLSession.shared.data(for: req)
-            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-            guard (200..<300).contains(code) else {
-                let body = String(decoding: data, as: UTF8.self).prefix(80)
-                return .failure("HTTP \(code): \(body)")
-            }
-            guard let obj = try? JSONDecoder().decode([String: String].self, from: data),
-                  let urlStr = obj["url"], let url = URL(string: urlStr) else {
-                return .failure("响应格式错误")
-            }
-            return .success(url)
-        } catch {
-            return .failure(error.localizedDescription)
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200..<300).contains(code) else {
+            let body = String(String(decoding: data, as: UTF8.self).prefix(80))
+            throw ArticlesLinkError.http(code, body)
         }
+        guard let obj = try? JSONDecoder().decode([String: String].self, from: data),
+              let urlStr = obj["url"], let url = URL(string: urlStr) else {
+            throw ArticlesLinkError.badResponse
+        }
+        return url
     }
 
     func save() async {
@@ -252,12 +259,12 @@ struct SettingsView: View {
                                 Task {
                                     fetchingArticlesLink = true
                                     defer { fetchingArticlesLink = false }
-                                    switch await store.articlesPageURL() {
-                                    case .success(let url):
+                                    do {
+                                        let url = try await store.articlesPageURL()
                                         articlesLinkError = nil
                                         await UIApplication.shared.open(url)
-                                    case .failure(let msg):
-                                        articlesLinkError = msg
+                                    } catch {
+                                        articlesLinkError = error.localizedDescription
                                     }
                                 }
                             } label: {
