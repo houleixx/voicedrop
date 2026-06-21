@@ -1,8 +1,8 @@
 name: Mine articles
 
 on:
-  # No cron — the miner is dispatched on demand: automatically by the files API
-  # on every new VoiceDrop-*.m4a upload, and manually via the app's 加急处理 button.
+  schedule:
+    - cron: '0 */6 * * *'   # every 6 hours
   workflow_dispatch: {}
 
 concurrency:
