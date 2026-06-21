@@ -1,5 +1,6 @@
 import SwiftUI
 import Observation
+import UIKit
 
 /// Per-user writing identity, stored on the server as users/<sub>/CLAUDE.md and
 /// appended to the article-mining prompt. Single source of truth = that one file.
@@ -12,8 +13,6 @@ final class SettingsStore {
     var saving = false
     var saved = false
     var error: String?
-    var mining = false
-    var mineMsg: String?
 
     private let base = URL(string: "https://jianshuo.dev/files/api")!
     private var token: String { AuthStore.shared.bearer }
@@ -69,27 +68,17 @@ final class SettingsStore {
             saved = true
         } catch { self.error = error.localizedDescription }
     }
-
-    /// Kick the server article-miner now instead of waiting for the hourly cron.
-    func triggerMine() async {
-        guard !token.isEmpty else { mineMsg = "请先登录"; return }
-        mining = true; mineMsg = nil
-        defer { mining = false }
-        var req = URLRequest(url: base.appending(path: "mine"))
-        req.httpMethod = "POST"
-        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        do {
-            let (_, resp) = try await URLSession.shared.data(for: req)
-            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-            mineMsg = (200..<300).contains(code) ? "已触发，过一会儿回「文章」看" : "触发失败（\(code)）"
-        } catch { mineMsg = error.localizedDescription }
-    }
 }
 
 struct SettingsView: View {
     var active: Bool = true
     @State private var store = SettingsStore()
-    @FocusState private var focused: Bool
+    @State private var editingStyle = false
+    @State private var idCopied = false
+    @State private var tokenCopied = false
+
+    private var anonId: String { AuthStore.shared.anonId }
+    private var anonToken: String { AuthStore.shared.anonToken }
 
     var body: some View {
         NavigationStack {
@@ -98,25 +87,34 @@ struct SettingsView: View {
                     field(title: "名字") {
                         TextField("你的名字", text: $store.name)
                             .textFieldStyle(.plain)
+                            .submitLabel(.done)
                             .foregroundStyle(.white)
                             .padding(12)
                             .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
                     }
+
                     field(title: "文风") {
                         VStack(alignment: .leading, spacing: 6) {
-                            TextEditor(text: $store.style)
-                                .focused($focused)
-                                .foregroundStyle(.white)
-                                .scrollContentBackground(.hidden)
-                                .frame(height: 200)        // fixed box; long text scrolls inside, never grows the page
-                                .padding(8)
+                            // Tap to edit in a full-screen sheet — the keyboard can't
+                            // cover the tab bar there, and 完成 sits above it.
+                            Button { editingStyle = true } label: {
+                                HStack(alignment: .top) {
+                                    Text(store.style.isEmpty ? "点这里编辑你的文风" : store.style)
+                                        .foregroundStyle(store.style.isEmpty ? .white.opacity(0.35) : .white.opacity(0.85))
+                                        .font(.callout).lineLimit(3)
+                                        .multilineTextAlignment(.leading)
+                                    Spacer()
+                                    Image(systemName: "square.and.pencil").foregroundStyle(.white.opacity(0.4))
+                                }
+                                .padding(12)
                                 .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+                            }
                             Text("把蒸馏出来的文风文本贴进来。服务器挖文章时会带上它，让文章更像你。")
                                 .font(.caption).foregroundStyle(.white.opacity(0.4))
                         }
                     }
+
                     Button {
-                        focused = false
                         Task { await store.save() }
                     } label: {
                         HStack {
@@ -134,26 +132,22 @@ struct SettingsView: View {
 
                     Divider().overlay(Color.white.opacity(0.08)).padding(.vertical, 6)
 
-                    field(title: "加急处理") {
+                    field(title: "账户") {
                         VStack(alignment: .leading, spacing: 10) {
-                            Text("不等每小时的自动处理，现在就让服务器立刻挖一遍新录音。")
-                                .font(.caption).foregroundStyle(.white.opacity(0.4))
-                            Button {
-                                Task { await store.triggerMine() }
-                            } label: {
-                                HStack(spacing: 8) {
-                                    if store.mining { ProgressView().tint(.white) }
-                                    else { Image(systemName: "bolt.fill") }
-                                    Text("立即处理")
+                            Text(anonId)
+                                .font(.caption.monospaced()).foregroundStyle(.white.opacity(0.5))
+                                .lineLimit(1).truncationMode(.middle)
+                                .textSelection(.enabled)
+                            HStack(spacing: 10) {
+                                copyButton(idCopied ? "已复制 ✓" : "复制 ID", "doc.on.doc") {
+                                    UIPasteboard.general.string = anonId; idCopied = true; tokenCopied = false
                                 }
-                                .frame(maxWidth: .infinity).padding(.vertical, 12)
-                                .background(Color.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
-                                .foregroundStyle(.white)
+                                copyButton(tokenCopied ? "已复制 ✓" : "复制访问令牌", "key") {
+                                    UIPasteboard.general.string = anonToken; tokenCopied = true; idCopied = false
+                                }
                             }
-                            .disabled(store.mining)
-                            if let m = store.mineMsg {
-                                Text(m).font(.footnote).foregroundStyle(.white.opacity(0.6))
-                            }
+                            Text("ID 是你在服务器上的文件夹名（可分享）；访问令牌是私密的，用于 jianshuo.dev/files 或 curl。")
+                                .font(.caption).foregroundStyle(.white.opacity(0.4))
                         }
                     }
 
@@ -163,27 +157,52 @@ struct SettingsView: View {
                 }
                 .padding(20)
             }
-            .scrollDismissesKeyboard(.interactively)   // swipe down to put the keyboard away
+            .scrollDismissesKeyboard(.interactively)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color.black.ignoresSafeArea())
             .navigationTitle("设置")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(Color.black, for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
-            .toolbar {
-                // A 完成 button above the keyboard — the reliable way to dismiss it
-                // and get back to the tab bar after editing 文风.
-                ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
-                    Button("完成") { focused = false }
-                }
-            }
             .onChange(of: store.name) { _, _ in store.saved = false }
             .onChange(of: store.style) { _, _ in store.saved = false }
         }
         .preferredColorScheme(.dark)
         .task { await store.load() }
         .onChange(of: active) { _, now in if now { Task { await store.load() } } }
+        .sheet(isPresented: $editingStyle) { styleEditor }
+    }
+
+    // Full-screen 文风 editor. The keyboard appears here, but 完成 is in the nav bar
+    // (above the keyboard) and the sheet can be swiped down — so nothing is blocked.
+    private var styleEditor: some View {
+        NavigationStack {
+            TextEditor(text: $store.style)
+                .foregroundStyle(.white)
+                .scrollContentBackground(.hidden)
+                .padding(12)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color.black.ignoresSafeArea())
+                .navigationTitle("文风")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbarBackground(Color.black, for: .navigationBar)
+                .toolbarColorScheme(.dark, for: .navigationBar)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("完成") { editingStyle = false }.bold()
+                    }
+                }
+        }
+        .preferredColorScheme(.dark)
+    }
+
+    private func copyButton(_ title: String, _ icon: String, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: icon)
+                .font(.caption).foregroundStyle(.white.opacity(0.85))
+                .padding(.horizontal, 12).padding(.vertical, 8)
+                .background(Color.white.opacity(0.08), in: Capsule())
+        }
     }
 
     private func field<Content: View>(title: String, @ViewBuilder _ content: () -> Content) -> some View {
