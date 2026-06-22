@@ -1,0 +1,30 @@
+name: Publish WeChat draft
+
+# On-demand: the app dispatches this with one article key when the user taps
+# 发布微信公众号草稿. WeChat's API only works from the whitelisted Tokyo proxy
+# (WECHAT_PROXY), so the push must run here, not in the phone or the CF function.
+on:
+  workflow_dispatch:
+    inputs:
+      article_key:
+        description: 'Full R2 key, users/<sub>/articles/<stem>.json'
+        required: true
+
+concurrency:
+  group: publish-wechat-${{ github.event.inputs.article_key }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Publish WeChat draft
+        run: python mining/publish_wechat.py
+        env:
+          FILES_TOKEN:  ${{ secrets.FILES_TOKEN }}
+          WECHAT_PROXY: ${{ secrets.WECHAT_PROXY }}
+          ARTICLE_KEY:  ${{ github.event.inputs.article_key }}

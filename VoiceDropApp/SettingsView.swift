@@ -160,7 +160,7 @@ final class SettingsStore {
 
 // MARK: – WeChat settings sheet
 
-private struct WechatSettingsSheet: View {
+struct WechatSettingsSheet: View {
     @Bindable var store: SettingsStore
     @Environment(\.dismiss) private var dismiss
     @State private var ipCopied = false

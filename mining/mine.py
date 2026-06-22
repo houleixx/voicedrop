@@ -141,10 +141,23 @@ def empty_key_for(audio_key):
     return f"{prefix}articles/{stem}.empty"
 
 
-def fetch_wechat_config(audio_key):
-    """Returns the user's WECHAT.json dict, or None if absent / disabled / incomplete."""
-    parts = audio_key.rsplit("/", 1)
-    prefix = parts[0] + "/" if len(parts) == 2 else ""
+def _user_prefix(key):
+    """The user's own prefix (users/<sub>/) for any key beneath it, where
+    WECHAT.json / CLAUDE.md live. Works for an audio key
+    (users/<sub>/VoiceDrop-*.m4a) and an article key
+    (users/<sub>/articles/<stem>.json). Flat (un-prefixed) keys → ''."""
+    if "/articles/" in key:
+        return key.split("/articles/")[0] + "/"
+    parts = key.rsplit("/", 1)
+    return parts[0] + "/" if len(parts) == 2 else ""
+
+
+def fetch_wechat_config(key, require_enabled=True):
+    """Returns the user's WECHAT.json dict, or None if absent / incomplete (or,
+    when require_enabled, if the 自动推草稿 toggle is off). On-demand publishing
+    from the app passes require_enabled=False — a manual tap should push even
+    when auto-push is disabled. `key` may be an audio or an article key."""
+    prefix = _user_prefix(key)
     try:
         raw = _req("GET", f"{BASE}/download/{quote(prefix + 'WECHAT.json')}",
                    headers={"Authorization": f"Bearer {TOKEN}"})
@@ -152,7 +165,7 @@ def fetch_wechat_config(audio_key):
         if not cfg.get("appid") or not cfg.get("secret"):
             return None
         # enabled defaults to True for backwards compat (old JSON had no field)
-        if cfg.get("enabled") is False:
+        if require_enabled and cfg.get("enabled") is False:
             return None
         return cfg
     except Exception:
@@ -264,8 +277,7 @@ def ensure_wechat_thumb(access_token, wechat_cfg, audio_key):
         return thumb_id
     thumb_id = _upload_wechat_cover(access_token)
     wechat_cfg["thumb_media_id"] = thumb_id
-    parts = audio_key.rsplit("/", 1)
-    prefix = parts[0] + "/" if len(parts) == 2 else ""
+    prefix = _user_prefix(audio_key)
     api_put(prefix + "WECHAT.json",
             json.dumps(wechat_cfg, ensure_ascii=False).encode(), "application/json")
     return thumb_id
@@ -291,6 +303,51 @@ def create_wechat_draft(access_token, title, body_md, thumb_media_id):
     if data.get("errcode") and data["errcode"] != 0:
         raise RuntimeError(f"WeChat draft error: {data}")
     return data.get("media_id", "")
+
+
+def update_wechat_draft(access_token, media_id, index, title, body_md, thumb_media_id):
+    """Update an existing WeChat draft in place (no new draft). draft/update takes
+    a single article object (not a list) at the given index."""
+    content_html = md_to_wechat_html(body_md)
+    payload = {
+        "media_id": media_id,
+        "index": index,
+        "articles": {
+            "title": title,
+            "thumb_media_id": thumb_media_id,
+            "content": content_html,
+            "need_open_comment": 0,
+            "only_fans_can_comment": 0,
+        },
+    }
+    raw = _wechat_req("POST",
+                      f"https://api.weixin.qq.com/cgi-bin/draft/update?access_token={access_token}",
+                      data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                      headers={"Content-Type": "application/json; charset=utf-8"})
+    data = json.loads(raw)
+    if data.get("errcode"):
+        raise RuntimeError(f"WeChat draft update error: {data}")
+
+
+def sync_wechat_drafts(access_token, art, thumb_media_id):
+    """Push one WeChat draft per article in `art`, mutating each in place:
+    an article that already carries a wechatMediaId is updated where it sits
+    (no duplicate); a new one is created and its media_id stored back. Lets the
+    miner's first pass and the app's on-demand 发布 share one path. Returns
+    (created, updated)."""
+    created = updated = 0
+    for a in art.get("articles", []):
+        mid = a.get("wechatMediaId")
+        if mid:
+            update_wechat_draft(access_token, mid, 0, a["title"], a["body"], thumb_media_id)
+            updated += 1
+            log(f"   ♻ WeChat draft updated: {a['title']} → {mid}")
+        else:
+            new_mid = create_wechat_draft(access_token, a["title"], a["body"], thumb_media_id)
+            a["wechatMediaId"] = new_mid
+            created += 1
+            log(f"   📩 WeChat draft: {a['title']} → {new_mid}")
+    return created, updated
 
 
 def fetch_claude_md(audio_key):
@@ -548,20 +605,15 @@ def main():
                 titles = " | ".join(a["title"] for a in articles)
                 log(f"   ✓ {len(articles)} article(s): {titles} (total {time.time()-rec_t0:.1f}s)")
 
-                # Push WeChat drafts if the user has credentials stored.
+                # Push WeChat drafts if the user has credentials stored and the
+                # 自动推草稿 toggle is on. Persists each article's wechatMediaId so
+                # a later on-demand 发布 updates that draft in place, not a dupe.
                 wechat_cfg = fetch_wechat_config(audio)
                 if wechat_cfg:
                     try:
                         wx_token = wechat_access_token(wechat_cfg["appid"], wechat_cfg["secret"])
                         thumb_id = ensure_wechat_thumb(wx_token, wechat_cfg, audio)
-                        media_ids = []
-                        for a in articles:
-                            mid = create_wechat_draft(wx_token, a["title"], a["body"], thumb_id)
-                            media_ids.append(mid)
-                            log(f"   📩 WeChat draft: {a['title']} → {mid}")
-                        # Persist media_ids back into the article JSON so we don't re-publish.
-                        for a, mid in zip(art["articles"], media_ids):
-                            a["wechatMediaId"] = mid
+                        sync_wechat_drafts(wx_token, art, thumb_id)
                         api_put(json_key, json.dumps(art, ensure_ascii=False).encode(),
                                 "application/json")
                     except Exception as wx_err:

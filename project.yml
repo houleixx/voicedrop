@@ -19,6 +19,7 @@ targets:
       properties:
         CFBundleDisplayName: VoiceDrop
         NSMicrophoneUsageDescription: "VoiceDrop 录下你的口述，并上传到你的文件中转站。"
+        NSSpeechRecognitionUsageDescription: "VoiceDrop 用语音识别把你对文章的修改要求转成文字，发给服务器。"
         NSLocationWhenInUseUsageDescription: "VoiceDrop 把当前位置（如城市/城区）写进录音文件名，方便日后辨认。可拒绝，录音照常。"
         UIBackgroundModes:
           - audio

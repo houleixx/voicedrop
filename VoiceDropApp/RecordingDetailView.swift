@@ -13,8 +13,14 @@ struct RecordingDetailView: View {
     @State private var loadingDoc = true
     @State private var loadingAudio = false
     @State private var articleIndex = 0
-    @State private var sharing = false
-    @State private var sharePayload: SharePayload?
+
+    // Three-dots menu actions.
+    @State private var settings = SettingsStore()      // for WeChat config status
+    @State private var publishing = false
+    @State private var showingWechatSettings = false
+    @State private var publishAfterSetup = false        // tapped 发布 before configuring
+    @State private var showingVoiceEdit = false
+    @State private var toast: String?
 
     private var articles: [MinedArticle] { doc?.resolvedArticles ?? [] }
 
@@ -43,21 +49,20 @@ struct RecordingDetailView: View {
         .toolbar {
             if !articles.isEmpty {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        Task {
-                            sharing = true
-                            if let u = await store.shareURL(recording) {
-                                let text = Self.composeShareText(articles[safe: articleIndex], url: u)
-                                sharePayload = SharePayload(text: text)
-                            }
-                            sharing = false
-                        }
+                    Menu {
+                        Button {
+                            Task { await publishWechatTapped() }
+                        } label: { Label("发布微信公众号草稿", systemImage: "paperplane") }
+
+                        Button {
+                            showingVoiceEdit = true
+                        } label: { Label("编辑", systemImage: "mic") }
                     } label: {
-                        if sharing { ProgressView().tint(.white) }
-                        else { Image(systemName: "square.and.arrow.up") }
+                        if publishing { ProgressView().tint(.white) }
+                        else { Image(systemName: "ellipsis") }
                     }
-                    .disabled(sharing)
-                    .accessibilityLabel("分享文章")
+                    .disabled(publishing)
+                    .accessibilityLabel("更多")
                 }
             }
         }
@@ -68,9 +73,65 @@ struct RecordingDetailView: View {
                 doc = await store.fetchDoc(recording)
             }
             loadingDoc = false
+            await settings.loadWechat()
         }
         .onDisappear { player.stop() }
-        .sheet(item: $sharePayload) { ShareSheet(items: [$0.text]) }
+        .sheet(isPresented: $showingWechatSettings, onDismiss: {
+            // If they just finished configuring after tapping 发布, continue.
+            if publishAfterSetup {
+                publishAfterSetup = false
+                if settings.wechatConfigured { Task { await sendWechat() } }
+            }
+        }) { WechatSettingsSheet(store: settings) }
+        .sheet(isPresented: $showingVoiceEdit) {
+            VoiceEditSheet { text in
+                let ok = await store.savePrompt(recording, text)
+                if ok { showToast("已发送修改要求到服务器") }
+                return ok
+            }
+        }
+        .overlay(alignment: .bottom) { toastView }
+    }
+
+    // MARK: Three-dots actions
+
+    /// 发布微信公众号草稿: if AppID/Secret aren't set yet, open the WeChat settings
+    /// sheet first (then auto-continue); otherwise dispatch the publish.
+    private func publishWechatTapped() async {
+        await settings.loadWechat()
+        guard settings.wechatConfigured else {
+            publishAfterSetup = true
+            showingWechatSettings = true
+            return
+        }
+        await sendWechat()
+    }
+
+    private func sendWechat() async {
+        publishing = true
+        let ok = await store.publishWechat(recording)
+        publishing = false
+        showToast(ok ? "已推送，约 1 分钟后到草稿箱" : "推送失败，请稍后再试")
+    }
+
+    private func showToast(_ msg: String) {
+        toast = msg
+        Task {
+            try? await Task.sleep(nanoseconds: 2_800_000_000)
+            if toast == msg { toast = nil }
+        }
+    }
+
+    @ViewBuilder
+    private var toastView: some View {
+        if let toast {
+            Text(toast)
+                .font(.callout).foregroundStyle(.white)
+                .padding(.horizontal, 18).padding(.vertical, 12)
+                .background(.ultraThinMaterial, in: Capsule())
+                .padding(.bottom, 32)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
     }
 
     // MARK: Article rendering
@@ -147,7 +208,6 @@ struct RecordingDetailView: View {
                 ScrollView {
                     // One selectable block (title + body) so a long-press → Select
                     // All → Copy grabs the whole article, not a single paragraph.
-                    // Sharing lives in the top-right toolbar; its sheet has Copy.
                     Text(articleAttributed(a))
                         .lineSpacing(5)
                         .textSelection(.enabled)
@@ -191,71 +251,4 @@ struct RecordingDetailView: View {
 
 private extension Array {
     subscript(safe i: Int) -> Element? { indices.contains(i) ? self[i] : nil }
-}
-
-/// A ready-to-share payload: ONE combined string (article excerpt + short link),
-/// sized to fit X's 280 weighted-char cap. We hand the share sheet a single
-/// String rather than String+URL because X's extension is unreliable when given
-/// both (it may drop one); inside one string the link is still tappable elsewhere.
-struct SharePayload: Identifiable { let text: String; var id: String { text } }
-
-extension RecordingDetailView {
-    /// X counts "weighted" characters: ASCII = 1, everything else (CJK) = 2.
-    private static func xWeight(_ s: String) -> Int {
-        s.reduce(0) { $0 + ($1.isASCII ? 1 : 2) }
-    }
-
-    /// Build the share string: title, a blank line, then as much of the body's
-    /// opening as fits — cut at a sentence boundary — then a blank line and the
-    /// short link. Budget = 280 − 23 (any URL is t.co-shortened to 23) − 4 (two
-    /// "\n\n" separators) for the title+excerpt text.
-    static func composeShareText(_ article: MinedArticle?, url: URL) -> String {
-        let link = url.absoluteString
-        guard let a = article else { return link }
-        let title = a.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        let textBudget = 280 - 23 - 4
-        let excerpt = sentenceTruncated(
-            a.body.trimmingCharacters(in: .whitespacesAndNewlines),
-            toWeight: max(0, textBudget - xWeight(title))
-        )
-        var out = title
-        if !excerpt.isEmpty { out += "\n\n" + excerpt }
-        out += "\n\n" + link
-        return out
-    }
-
-    /// Longest prefix of `s` within `budget` weighted chars, ending at the last
-    /// sentence boundary (。！？!?.\n) seen. Appends "…" only on a mid-sentence cut.
-    private static func sentenceTruncated(_ s: String, toWeight budget: Int) -> String {
-        if budget <= 2 { return "" }
-        let boundaries: Set<Character> = ["。", "！", "？", "!", "?", ".", "\n"]
-        var weight = 0
-        var cut = s.startIndex            // hard-cut end (exclusive)
-        var lastBoundary = s.startIndex   // end after the most recent boundary char
-        var i = s.startIndex
-        while i < s.endIndex {
-            let c = s[i]
-            let w = c.isASCII ? 1 : 2
-            if weight + w > budget - 2 { break }   // reserve 2 for a possible "…"
-            weight += w
-            let next = s.index(after: i)
-            cut = next
-            if boundaries.contains(c) { lastBoundary = next }
-            i = next
-        }
-        let usedBoundary = lastBoundary > s.startIndex
-        let end = usedBoundary ? lastBoundary : cut
-        var out = String(s[s.startIndex..<end]).trimmingCharacters(in: .whitespacesAndNewlines)
-        if end < s.endIndex && !usedBoundary && !out.isEmpty { out += "…" }
-        return out
-    }
-}
-
-/// The system share sheet (UIActivityViewController) for SwiftUI.
-struct ShareSheet: UIViewControllerRepresentable {
-    let items: [Any]
-    func makeUIViewController(context: Context) -> UIActivityViewController {
-        UIActivityViewController(activityItems: items, applicationActivities: nil)
-    }
-    func updateUIViewController(_ vc: UIActivityViewController, context: Context) {}
 }
