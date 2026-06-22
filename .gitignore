@@ -37,3 +37,6 @@ build/
 __pycache__/
 *.pyc
 .gstack/
+
+# Design handoff reference (kept locally, not tracked)
+design_handoff_voicedrop_redesign/
