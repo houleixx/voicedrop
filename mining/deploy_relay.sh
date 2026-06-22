@@ -17,5 +17,9 @@ rsync -avz \
   "$HERE/vps/provision.sh" \
   "$VPS_SSH:$DEST/"
 echo "→ restart + health check"
-ssh "$VPS_SSH" "systemctl restart wechat-relay && sleep 1 && systemctl is-active wechat-relay && curl -fsS http://127.0.0.1:8848/health && echo"
-echo "✓ deployed"
+ssh "$VPS_SSH" 'if systemctl list-unit-files | grep -q "^wechat-relay.service"; then
+    systemctl restart wechat-relay && sleep 1 && systemctl is-active wechat-relay && curl -fsS http://127.0.0.1:8848/health && echo;
+  else
+    echo "wechat-relay not installed yet — first run: WECHAT_RELAY_SECRET=<secret> bash /opt/wechat-relay/provision.sh";
+  fi'
+echo "✓ files synced"
