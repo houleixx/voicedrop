@@ -2,13 +2,13 @@ name: VoiceDrop
 options:
   bundleIdPrefix: com.wangjianshuo
   deploymentTarget:
-    iOS: "26.0"
+    iOS: "18.0"
 
 targets:
   VoiceDrop:
     type: application
     platform: iOS
-    deploymentTarget: "26.0"
+    deploymentTarget: "18.0"
     sources:
       - path: VoiceDropApp
     configFiles:
