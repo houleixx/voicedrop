@@ -11,6 +11,7 @@ struct LibraryView: View {
     @State private var confirmReprocess: Recording?
     @State private var showRecord = false
     @State private var showSettings = false
+    @State private var selectedRec: Recording?
     @Environment(\.scenePhase) private var scenePhase
 
     /// Local takes still uploading (shown at the top) + server recordings.
@@ -30,6 +31,7 @@ struct LibraryView: View {
         .background(Theme.appBG.ignoresSafeArea())
         .safeAreaInset(edge: .bottom, spacing: 0) { recordDock }
         .toolbar(.hidden, for: .navigationBar)
+        .navigationDestination(item: $selectedRec) { rec in RecordingDetailView(store: store, recording: rec) }
         .navigationDestination(isPresented: $showSettings) { SettingsView() }
         .fullScreenCover(isPresented: $showRecord) {
             RecordSession { showRecord = false; Task { await refresh() } }
@@ -85,19 +87,20 @@ struct LibraryView: View {
         } else {
             List {
                 ForEach(rows) { rec in
-                    if rec.uploading {
-                        rowCard(rec)
-                            .listRowBackground(Color.clear).listRowSeparator(.hidden)
-                            .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 6, trailing: 16))
-                    } else {
-                        NavigationLink {
-                            RecordingDetailView(store: store, recording: rec)
-                        } label: {
+                    Group {
+                        if rec.uploading {
                             rowCard(rec)
+                        } else {
+                            // Button (not NavigationLink) so the List doesn't add its
+                            // own trailing disclosure chevron — the card draws its own.
+                            Button { selectedRec = rec } label: { rowCard(rec) }
+                                .buttonStyle(.plain)
                         }
-                        .listRowBackground(Color.clear).listRowSeparator(.hidden)
-                        .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 6, trailing: 16))
-                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    }
+                    .listRowBackground(Color.clear).listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 6, trailing: 16))
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        if !rec.uploading {
                             Button(role: .destructive) { confirmDelete = rec } label: { Label("删除", systemImage: "trash") }
                                 .tint(.red)
                         }

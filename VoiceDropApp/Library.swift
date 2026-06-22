@@ -33,7 +33,7 @@ struct ArticleDoc: Decodable {
 
 /// A recording as seen in the user's R2 space: the audio key plus whether the
 /// miner has produced an article JSON for it yet.
-struct Recording: Identifiable {
+struct Recording: Identifiable, Hashable {
     let audioName: String        // relative key, e.g. "VoiceDrop-….m4a"
     let uploaded: String
     let hasArticles: Bool
