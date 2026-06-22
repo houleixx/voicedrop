@@ -488,9 +488,20 @@ struct WechatSettingsSheet: View {
                         .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.R.input))
                         .overlay(RoundedRectangle(cornerRadius: Theme.R.input).stroke(Theme.inputBorder, lineWidth: 1.5))
 
-                        (Text("凭证只保存在你的设备与服务器的加密配置里，不会出现在文章中。")
-                            + Text(" 去哪里找 AppID？").foregroundColor(Theme.accent))
-                            .font(.system(size: 12.5)).foregroundStyle(Theme.faint)
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("凭证只保存在你的设备与服务器的加密配置里，不会出现在文章中。")
+                                .font(.system(size: 12.5)).foregroundStyle(Theme.faint)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Link(destination: URL(string: "https://developers.weixin.qq.com/doc/offiaccount/Basic_Information/Get_access_token.html")!) {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "safari").font(.system(size: 11))
+                                    Text("去哪里找 AppID / AppSecret？")
+                                        .font(.system(size: 12.5, weight: .semibold))
+                                    Image(systemName: "arrow.up.right").font(.system(size: 10))
+                                }
+                                .foregroundStyle(Theme.accent)
+                            }
+                        }
 
                         if let e = store.wechatError { Text(e).font(.system(size: 13)).foregroundStyle(.orange) }
                     }
