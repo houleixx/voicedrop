@@ -360,9 +360,19 @@ struct RecordingDetailView: View {
 
     private func sendWechat() async {
         publishing = true
-        let ok = await store.publishWechat(recording)
+        let result = await store.publishWechat(recording)
         publishing = false
-        showToast(ok ? "已推送，约 1 分钟后到草稿箱" : "推送失败，请稍后再试")
+        switch result {
+        case .ok:
+            showToast("已推送，约 1 分钟后到草稿箱")
+        case .notConfigured:
+            // Server says WeChat isn't configured (local state was stale) — open
+            // the config sheet and continue the publish once saved.
+            publishAfterSetup = true
+            showingWechatSettings = true
+        case .failed:
+            showToast("推送失败，请稍后再试")
+        }
     }
 
     private func showToast(_ msg: String) {

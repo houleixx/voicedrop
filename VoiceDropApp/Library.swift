@@ -243,20 +243,26 @@ final class LibraryStore {
         } catch { return nil }
     }
 
+    enum PublishResult { case ok, notConfigured, failed }
+
     /// Ask the server to push this recording's article(s) to the WeChat 公众号
     /// draft box. WeChat's API only works from the whitelisted proxy in GitHub
     /// Actions, so this just dispatches that workflow — the draft appears ~1 min
     /// later. If the article was published before, its draft is updated in place
-    /// (no duplicate). Returns true if the dispatch was accepted.
-    func publishWechat(_ rec: Recording) async -> Bool {
-        guard !token.isEmpty, rec.hasArticles else { return false }
+    /// (no duplicate). The server pre-checks WECHAT.json: a 409 means WeChat isn't
+    /// configured (→ `.notConfigured`, so the UI can open the config sheet).
+    func publishWechat(_ rec: Recording) async -> PublishResult {
+        guard !token.isEmpty, rec.hasArticles else { return .failed }
         var req = URLRequest(url: base.appending(path: "wechat").appending(path: rec.articleKey))
         req.httpMethod = "POST"
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         do {
             let (_, resp) = try await URLSession.shared.data(for: req)
-            return (resp as? HTTPURLResponse).map { (200..<300).contains($0.statusCode) } == true
-        } catch { return false }
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            if (200..<300).contains(code) { return .ok }
+            if code == 409 { return .notConfigured }
+            return .failed
+        } catch { return .failed }
     }
 
     /// Download the audio to a temp file for local playback.
