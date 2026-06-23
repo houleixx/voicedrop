@@ -21,6 +21,9 @@ jobs:
           cache: 'pip'
           cache-dependency-path: mining/requirements.txt
 
+      - name: Install ffmpeg
+        run: sudo apt-get install -y ffmpeg
+
       - name: Install deps
         run: pip install -r mining/requirements.txt
 
