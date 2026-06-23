@@ -73,7 +73,7 @@ struct LibraryView: View {
         .navigationDestination(item: $selectedPost) { post in
             CommunityPostView(store: community, post: post, onRecordFinished: responseRecorded)
         }
-        .navigationDestination(isPresented: $showSettings) { SettingsView() }
+        .navigationDestination(isPresented: $showSettings) { SettingsView(libraryStore: store) }
         .fullScreenCover(isPresented: $showRecord) {
             RecordSession { showRecord = false; Task { await refresh() } }
         }
