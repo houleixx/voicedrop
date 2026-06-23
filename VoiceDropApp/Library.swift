@@ -330,6 +330,9 @@ final class LibraryStore {
         }
     }
 
+    /// Download raw data for any relative key (used by ExportManager).
+    func downloadData(_ relName: String) async throws -> Data { try await get(relName) }
+
     /// Download the audio to a temp file for local playback.
     func downloadAudio(_ rec: Recording) async -> URL? {
         do {

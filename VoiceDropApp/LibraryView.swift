@@ -16,6 +16,8 @@ struct LibraryView: View {
     @State private var confirmReprocess: Recording?
     @State private var showRecord = false
     @State private var showSettings = false
+    @State private var showingExport = false
+    @State private var exportManager = ExportManager()
     @State private var selectedRec: Recording?
     @State private var selectedPost: CommunityPost?
     @State private var confirmUnshare: CommunityPost?
@@ -51,6 +53,11 @@ struct LibraryView: View {
         .navigationDestination(isPresented: $showSettings) { SettingsView() }
         .fullScreenCover(isPresented: $showRecord) {
             RecordSession { showRecord = false; Task { await refresh() } }
+        }
+        .sheet(isPresented: $showingExport, onDismiss: { exportManager.reset() }) {
+            ExportSheet(manager: exportManager, recordings: store.recordings, store: store)
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.hidden)
         }
         .task {
             statusSession.onProcessing = { stem in store.markProcessing(stem: stem) }
@@ -98,7 +105,10 @@ struct LibraryView: View {
                 Text("VoiceDrop 口述").font(.system(size: 14, weight: .semibold)).tracking(1).foregroundStyle(Theme.ink)
             }
             Spacer()
-            NavSquare(systemName: "gearshape") { showSettings = true }.accessibilityLabel("设置")
+            HStack(spacing: 8) {
+                NavSquare(systemName: "square.and.arrow.down") { showingExport = true }.accessibilityLabel("导出数据")
+                NavSquare(systemName: "gearshape") { showSettings = true }.accessibilityLabel("设置")
+            }
         }
         .padding(.top, 6).padding(.horizontal, 22).padding(.bottom, 10)
     }
