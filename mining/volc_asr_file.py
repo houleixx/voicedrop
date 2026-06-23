@@ -115,25 +115,22 @@ def poll(task_id, logid, deadline):
         r = requests.post(QUERY_URL, json={"task_id": task_id},
                           headers=hdrs, timeout=30)
         r.raise_for_status()
-        body_text = r.text.strip()
-        if not body_text or body_text == "{}":
-            time.sleep(2)
-            continue
-        res = json.loads(body_text)
-        # Check standard code field first (for error responses)
-        code = res.get("code")
-        if code is not None:
-            if code == STATUS_DONE:
-                return res
-            if code in (STATUS_QUEUED, STATUS_PROCESSING):
-                time.sleep(2)
-                continue
-            print(f"ASR error {code}: {res.get('message')}", file=sys.stderr)
-            sys.exit(1)
-        # No code field: API returns result directly.
-        # Done when result.text is non-empty; still processing if empty.
-        if res.get("result", {}).get("text", ""):
+        status = r.headers.get("X-Api-Status-Code", "")
+        res = json.loads(r.text) if r.text.strip() else {}
+        # Done detection (observed body shapes, captured from live runs):
+        #   processing → {"audio_info":{}, "result":{"text":""}}   (empty audio_info)
+        #   done       → {"audio_info":{"duration":N}, "result":{...}}
+        # The body carries NO `code` field, so we key off audio_info being
+        # populated — this fires even for SILENT clips (which finish with empty
+        # text). Relying on result.text hangs forever on silent audio.
+        if (status == str(STATUS_DONE)
+                or res.get("audio_info", {})
+                or res.get("result", {}).get("text", "").strip()):
             return res
+        # Hard error: status header present and not a known in-progress code.
+        if status and status not in (str(STATUS_QUEUED), str(STATUS_PROCESSING)):
+            print(f"ASR error status={status} body={r.text[:200]}", file=sys.stderr)
+            sys.exit(1)
         time.sleep(2)
     print("ASR timed out", file=sys.stderr)
     sys.exit(1)
