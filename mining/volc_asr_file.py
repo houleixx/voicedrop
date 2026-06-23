@@ -116,15 +116,16 @@ def poll(task_id, logid, deadline):
                           headers=hdrs, timeout=30)
         r.raise_for_status()
         body_text = r.text.strip()
+        print(f"[poll] {body_text[:200]}", file=sys.stderr)
         if not body_text or body_text == "{}":
-            # Still queued / processing — {} means "not done yet"
             time.sleep(2)
             continue
         res = json.loads(body_text)
         code = res.get("code", 0)
         if code == STATUS_DONE:
             return res
-        if code in (STATUS_QUEUED, STATUS_PROCESSING):
+        if code in (STATUS_QUEUED, STATUS_PROCESSING, 0):
+            # 0 = "task not ready yet" (returned immediately after submit)
             time.sleep(2)
             continue
         print(f"ASR error {code}: {res.get('message')}", file=sys.stderr)
