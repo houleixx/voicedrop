@@ -467,27 +467,6 @@ def fetch_claude_md(audio_key):
         return ""
 
 
-def probe_duration(path):
-    """Seconds of decodable audio, or None if the file won't probe (corrupt /
-    missing moov atom / 0-byte)."""
-    try:
-        out = subprocess.run(
-            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-             "-of", "csv=p=0", path],
-            capture_output=True, text=True, timeout=30)
-        stdout = out.stdout.strip()
-        if not stdout:
-            log(f"   ffprobe: no stdout (stderr: {out.stderr.strip()[:120]!r})")
-            return None
-        return float(stdout)
-    except FileNotFoundError:
-        log("   ffprobe not found in PATH")
-        return None
-    except Exception as e:
-        log(f"   ffprobe failed: {e}")
-        return None
-
-
 def notify(audio_key, status):
     """Fire-and-forget: push a status change to the user's StatusHub so the app
     can update in real-time without polling. Non-fatal — a failed notify just
@@ -677,20 +656,10 @@ def main():
                 size = os.path.getsize(local)
                 log(f"   download {size/1024:.0f}KB ({dl:.1f}s)")
 
-                # Corrupt / silent files never reach ASR — mark and move on.
-                dur = probe_duration(local)
-                if dur is None or dur < 1.0:
-                    reason = "corrupt" if dur is None else "silent"
-                    write_empty(audio, reason)
-                    empty += 1
-                    log(f"   ✗ {reason} → marked 无语音 (total {time.time()-rec_t0:.1f}s)")
-                    notify(audio, "empty")
-                    continue
-
-                # ASR streams at ~realtime (chunked + parallel); bound generously
-                # at 2× duration + 2min so a wedged connection fails fast.
+                # ASR uses ffmpeg internally; corrupt/silent files exit with
+                # EMPTY_ASR_EXIT (3) → transcribe() returns ("", "") → caught below.
                 t = time.time()
-                transcript, srt = transcribe(local, timeout_s=max(180, int(dur * 2) + 120))
+                transcript, srt = transcribe(local, timeout_s=600)
                 asr = time.time() - t; tot_asr += asr
                 log(f"   ASR → {len(transcript)} chars ({asr:.1f}s)")
 
