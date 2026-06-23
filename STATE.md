@@ -127,7 +127,9 @@ app's existing tokens) + `CLAUDE_API_KEY`. Two Durable Objects (`agent/src/index
   the hub broadcasts `{type:"status_update",stem,status}` to that user's app sockets, so rows flip
   **待处理 → 处理中 → 已成文** with no polling (`StatusSession.swift`, `LibraryStore.markProcessing/markDone`).
 
-Secrets (`wrangler secret put`): `SESSION_SECRET` (same value as Pages), `CLAUDE_API_KEY`.
+Secrets (`wrangler secret put`): `SESSION_SECRET` (same value as Pages — verifies Apple JWTs;
+anon tokens work without it), `CLAUDE_API_KEY`, **`FILES_TOKEN`** (= Pages FILES_TOKEN; authenticates
+`mine.py`'s `POST /agent/notify` — if missing, notify 401s and status never updates).
 Deploy: `cd ~/code/jianshuo.dev/agent && npx wrangler deploy`.
 
 ## Community (VD社区)
