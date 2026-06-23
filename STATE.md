@@ -175,10 +175,10 @@ gear → **设置** (redesign "方案二"; the old `ContentView` 3-tab `TabView`
 ## Server miner (`mining/mine.py`)
 
 - Triggered on every new audio upload (files API auto-dispatch). No cron. Idempotent: skips anything with a `.json` or `.empty` marker.
-- Per recording: download → ffprobe (corrupt→`.empty corrupt`, <1s→`.empty silent`) → Volcano ASR (empty→`.empty no-speech`) → Claude API (`MINE_MODEL`, default claude-sonnet-4-6) → write `.json`.
+- Per recording: presign R2 key → Volcano **async file ASR** (empty→`.empty no-speech`) → Claude API (`MINE_MODEL`, default claude-sonnet-4-6) → write `.json`. (No local download/ffprobe — the file API takes a URL.)
 - **JSON is forced**: `_articles_from` strips ``` / ```json fences + stray leading `json`, extracts the outermost `{…}`; if unparseable it **raises (retries next cycle)** — never stores raw model text as a body. (Assistant prefill is NOT used — sonnet-4-6 rejects it with 400.)
 - Reads the owner's `CLAUDE.md` and appends it after the system prompt.
-- ASR (`volc_asr_stream.py`) fast-fails on empty PCM (exit 3) so corrupt files can't hang ~15 min; `transcribe()` has a duration-based timeout.
+- ASR = `volc_asr_file.py` (火山 bigmodel `volc.bigasr.auc`): presign → submit URL → poll `query` until done, 600s deadline. **Done-detection keys off `audio_info` being populated** (the query body has no `code` field; `audio_info` is `{}` while processing, gains a `duration` once done — even for silent clips). Empty text → exit 3 → `.empty no-speech`. *(Fixed 2026-06-23: the prior `result.text`-non-empty check hung silent/short clips for the full 600s — every such run died "ASR timed out".)*
 - Timestamped profiling logs end with `DONE: N mined · M empty · Ts [ASR x% · LLM y% · net z%]` (ASR is the long pole).
 
 ## CI / CD & concurrency
