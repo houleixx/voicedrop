@@ -262,12 +262,16 @@ func settingsSectionLabel(_ t: String) -> some View {
 // MARK: - Settings
 
 struct SettingsView: View {
+    let libraryStore: LibraryStore
+
     @Environment(\.dismiss) private var dismiss
     @State private var store = SettingsStore()
     @State private var prefs = Prefs.shared
     @State private var showWechat = false
     @State private var showStyle = false
     @State private var showPrivacy = false
+    @State private var showingExport = false
+    @State private var exportManager = ExportManager()
 
     private var shortTag: String {
         let id = AuthStore.shared.anonId          // "anon-7f3a…"
@@ -323,6 +327,12 @@ struct SettingsView: View {
                                 Toggle("", isOn: Binding(get: { prefs.iCloudBackup }, set: { prefs.iCloudBackup = $0 }))
                                     .labelsHidden().tint(Theme.accent)
                             }
+                            settingsRowDivider
+                            Button { showingExport = true } label: {
+                                SettingsRow(tileBG: Theme.tileNeutral, symbol: "square.and.arrow.down",
+                                            tileFG: Theme.secondary, title: "导出数据",
+                                            subtitle: "所有录音和文章打包下载") { settingsChevron }
+                            }.buttonStyle(.plain)
                         }
                     }
 
@@ -348,6 +358,11 @@ struct SettingsView: View {
         .task { await store.load(); await store.loadWechat() }
         .sheet(isPresented: $showWechat) { WechatSettingsSheet(store: store) }
         .sheet(isPresented: $showStyle) { WritingStyleSheet(store: store) }
+        .sheet(isPresented: $showingExport, onDismiss: { exportManager.reset() }) {
+            ExportSheet(manager: exportManager, recordings: libraryStore.recordings, store: libraryStore)
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.hidden)
+        }
         .alert("隐私说明", isPresented: $showPrivacy) {
             Button("好") {}
         } message: {

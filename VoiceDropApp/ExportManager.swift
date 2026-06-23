@@ -79,8 +79,13 @@ final class ExportManager {
 // MARK: - ZIP writer (Store / no compression)
 
 private extension Data {
-    mutating func appendLE16(_ v: UInt16) { var x = v.littleEndian; withUnsafeBytes(of: &x) { append(contentsOf: $0) } }
-    mutating func appendLE32(_ v: UInt32) { var x = v.littleEndian; withUnsafeBytes(of: &x) { append(contentsOf: $0) } }
+    mutating func appendLE16(_ v: UInt16) {
+        append(UInt8(v & 0xFF)); append(UInt8(v >> 8))
+    }
+    mutating func appendLE32(_ v: UInt32) {
+        append(UInt8(v & 0xFF)); append(UInt8((v >> 8) & 0xFF))
+        append(UInt8((v >> 16) & 0xFF)); append(UInt8(v >> 24))
+    }
 }
 
 private func crc32Of(_ data: Data) -> UInt32 {
