@@ -475,8 +475,16 @@ def probe_duration(path):
             ["ffprobe", "-v", "error", "-show_entries", "format=duration",
              "-of", "csv=p=0", path],
             capture_output=True, text=True, timeout=30)
-        return float(out.stdout.strip())
-    except Exception:
+        stdout = out.stdout.strip()
+        if not stdout:
+            log(f"   ffprobe: no stdout (stderr: {out.stderr.strip()[:120]!r})")
+            return None
+        return float(stdout)
+    except FileNotFoundError:
+        log("   ffprobe not found in PATH")
+        return None
+    except Exception as e:
+        log(f"   ffprobe failed: {e}")
         return None
 
 
