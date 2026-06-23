@@ -47,74 +47,33 @@ final class CommunityStore {
         } catch { self.error = error.localizedDescription }
     }
 
-    /// Share (or re-share) one of the user's articles to the community. Re-sharing
-    /// updates the snapshot in place; the first-share time is preserved server-side.
-    /// If the server returns 403 needs_apple_signin, triggers Apple sign-in and retries once.
+    /// Share (or re-share) one of the user's articles to the community.
     func share(_ rec: Recording) async -> Bool {
-        needsAppleSignIn = false
         guard !token.isEmpty, rec.hasArticles else { return false }
-        if await postShare(rec) { return true }
-        // Not Apple-verified yet → sign in once and retry.
-        if needsAppleSignIn {
-            await AuthStore.shared.signInWithApple()
-            guard AuthStore.shared.isAuthenticated else { return false }
-            return await postShare(rec)
-        }
-        return false
-    }
-
-    private var needsAppleSignIn = false
-
-    private func postShare(_ rec: Recording) async -> Bool {
         var req = URLRequest(url: base.appending(path: "community").appending(path: "share").appending(path: rec.articleKey))
         req.httpMethod = "POST"
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         do {
-            let (data, resp) = try await URLSession.shared.data(for: req)
-            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-            if (200..<300).contains(code) { needsAppleSignIn = false; return true }
-            needsAppleSignIn = (code == 403) &&
-                ((try? JSONDecoder().decode([String:String].self, from: data))?["error"] == "needs_apple_signin")
-            return false
+            let (_, resp) = try await URLSession.shared.data(for: req)
+            return (resp as? HTTPURLResponse).map { (200..<300).contains($0.statusCode) } == true
         } catch { return false }
     }
 
     /// Un-share (delete) one of the user's own community posts. Removed from the
     /// list immediately (optimistic); reloads if the server rejects it.
-    /// If the server returns 403 needs_apple_signin, triggers Apple sign-in and retries once.
     @discardableResult
     func unshare(_ shareId: String) async -> Bool {
-        needsAppleSignIn = false
         guard !token.isEmpty else { return false }
         posts.removeAll { $0.shareId == shareId }
-        if await postUnshare(shareId) { return true }
-        // 403 needs sign-in → sign in once and retry
-        if needsAppleSignIn {
-            await AuthStore.shared.signInWithApple()
-            if AuthStore.shared.isAuthenticated {
-                if await postUnshare(shareId) { return true }
-            }
-            // Sign-in was dismissed or retry failed — restore the optimistically-removed post
-            await load()
-            return false
-        }
-        // Hard failure (non-403 or network error) — restore
-        await load()
-        return false
-    }
-
-    private func postUnshare(_ shareId: String) async -> Bool {
         var req = URLRequest(url: base.appending(path: "community").appending(path: "unshare").appending(path: shareId))
         req.httpMethod = "POST"
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         do {
-            let (data, resp) = try await URLSession.shared.data(for: req)
-            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-            if (200..<300).contains(code) { needsAppleSignIn = false; return true }
-            needsAppleSignIn = (code == 403) &&
-                ((try? JSONDecoder().decode([String:String].self, from: data))?["error"] == "needs_apple_signin")
-            return false
-        } catch { return false }
+            let (_, resp) = try await URLSession.shared.data(for: req)
+            let ok = (resp as? HTTPURLResponse).map { (200..<300).contains($0.statusCode) } == true
+            if !ok { await load() }
+            return ok
+        } catch { await load(); return false }
     }
 
     /// Whether this article is currently shared to the community (drives the

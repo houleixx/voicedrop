@@ -143,7 +143,6 @@ struct RecordingDetailView: View {
     }
 
     private func shareToCommunity() async {
-        if !AuthStore.shared.isAuthenticated { showToast("分享到社区需要用 Apple 登录，确认你是同一个人") }
         let wasShared = sharedToCommunity
         let ok = await community.share(recording)
         if ok { sharedToCommunity = true }
