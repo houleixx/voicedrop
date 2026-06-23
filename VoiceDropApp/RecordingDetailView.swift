@@ -36,6 +36,7 @@ struct RecordingDetailView: View {
 
     // Live voice editing — persistent push-to-talk bar.
     @State private var agentReply: AgentReply?
+    @State private var replyHeld = false
     @State private var agent = ArticleAgentSession()
     @State private var dictation = SpeechDictation()
     @State private var willCancel = false           // slid finger up past threshold
@@ -97,12 +98,7 @@ struct RecordingDetailView: View {
         agent.onReply = { text, ok in
             let reply = AgentReply(text: text, ok: ok)
             agentReply = reply
-            if ok {
-                Task {
-                    try? await Task.sleep(nanoseconds: 3_000_000_000)
-                    if agentReply?.id == reply.id { agentReply = nil }
-                }
-            }
+            if ok { scheduleReplyDismiss(reply) }
         }
         agent.connect(recording)
         await dictation.requestAuth()
@@ -390,8 +386,18 @@ struct RecordingDetailView: View {
         .gesture(holdGesture())
     }
 
-    /// The agent's transient one-line reply. Success: neutral light card (auto-fades).
-    /// Error: muted-red border + warning glyph, sticky until tapped.
+    /// Auto-dismiss a successful reply after a beat — but not while the user is
+    /// pressing it (replyHeld), and only if it's still the same reply on screen.
+    private func scheduleReplyDismiss(_ reply: AgentReply) {
+        Task {
+            try? await Task.sleep(nanoseconds: 6_000_000_000)
+            if agentReply?.id == reply.id, !replyHeld { agentReply = nil }
+        }
+    }
+
+    /// The agent's transient one-line reply. Success: neutral light card that fades
+    /// after ~6 s — press and hold to keep it up; it re-arms the fade on release.
+    /// Error: muted-red border + warning glyph, sticky until tapped (release dismisses).
     private func replyBubble(_ reply: AgentReply) -> some View {
         let warn = Color(hex: "C0392B")
         return HStack(spacing: 8) {
@@ -410,7 +416,15 @@ struct RecordingDetailView: View {
             .stroke(reply.ok ? Theme.borderRead : warn.opacity(0.7), lineWidth: 1))
         .transition(.move(edge: .bottom).combined(with: .opacity))
         .contentShape(RoundedRectangle(cornerRadius: 13))
-        .onTapGesture { if !reply.ok { agentReply = nil } }
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in replyHeld = true }
+                .onEnded { _ in
+                    replyHeld = false
+                    if reply.ok { scheduleReplyDismiss(reply) }   // re-arm the fade after release
+                    else { agentReply = nil }                      // error: release/tap dismisses
+                }
+        )
     }
 
     /// Dark bubble above the bar showing the live transcript (text only).
