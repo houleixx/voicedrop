@@ -154,6 +154,39 @@ def api_put(key, body_bytes, content_type):
          headers={"Authorization": f"Bearer {TOKEN}", "Content-Type": content_type})
 
 
+def _article_stem(json_key):
+    """Extract "<sub>/<stem>" from "users/<sub>/articles/<stem>.json" for the article API."""
+    # "users/<sub>/articles/<stem>.json" → "<sub>/<stem>"
+    without_users = json_key.removeprefix("users/")          # "<sub>/articles/<stem>.json"
+    sub, rest = without_users.split("/articles/", 1)          # sub, "<stem>.json"
+    stem = rest.removesuffix(".json")
+    return f"{sub}/{stem}"
+
+
+def api_article_write(json_key, doc):
+    """Write an article JSON through the high-level article API (versioned)."""
+    stem = _article_stem(json_key)
+    _req("PUT", f"{BASE}/articles/{quote(stem, safe='/')}",
+         data=json.dumps(doc, ensure_ascii=False).encode(),
+         headers={"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"})
+
+
+def api_article_srt(srt_key, content):
+    """Write an SRT sidecar through the article API."""
+    stem = _article_stem(srt_key.replace(".srt", ".json"))
+    _req("PUT", f"{BASE}/articles/{quote(stem, safe='/')}/srt",
+         data=content if isinstance(content, bytes) else content.encode(),
+         headers={"Authorization": f"Bearer {TOKEN}", "Content-Type": "text/plain"})
+
+
+def api_article_empty(empty_key, reason="no-speech"):
+    """Mark a recording as no-speech through the article API."""
+    stem = _article_stem(empty_key.replace(".empty", ".json"))
+    _req("PUT", f"{BASE}/articles/{quote(stem, safe='/')}/empty",
+         data=json.dumps({"reason": reason}).encode(),
+         headers={"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"})
+
+
 def api_exists(key):
     # R2 list is eventually consistent — a just-written object may not yet appear
     # in list results. Single-key HEAD is always strongly consistent.
@@ -525,10 +558,7 @@ def write_empty(audio, reason):
     """Mark a recording processed-but-empty so it's never re-mined and the app
     can show a 无语音 badge. reason ∈ {corrupt, silent, no-speech, no-article}."""
     key = empty_key_for(audio)
-    body = {"schema": 2, "status": "empty", "reason": reason,
-            "id": os.path.basename(audio)[:-4],
-            "sourceAudio": os.path.basename(audio)}
-    api_put(key, json.dumps(body, ensure_ascii=False).encode(), "application/json")
+    api_article_empty(key, reason)
     return key
 
 
@@ -772,10 +802,9 @@ def main():
                 "model": MODEL,
             }
             t = time.time()
-            api_put(json_key, json.dumps(art, ensure_ascii=False).encode(),
-                    "application/json")
+            api_article_write(json_key, art)
             if srt:
-                api_put(srt_key, srt.encode(), "application/x-subrip; charset=utf-8")
+                api_article_srt(srt_key, srt)
             tot_net += time.time() - t
             notify(audio, "ready")   # app: 处理中 → 已成文
             mined += 1
@@ -796,8 +825,7 @@ def main():
                     # Persist the cover->media_id cache, then the wechatMediaIds.
                     api_put(_user_prefix(audio) + "WECHAT.json",
                             json.dumps(wechat_cfg, ensure_ascii=False).encode(), "application/json")
-                    api_put(json_key, json.dumps(art, ensure_ascii=False).encode(),
-                            "application/json")
+                    api_article_write(json_key, art)
                 except Exception as wx_err:
                     log(f"   ⚠ WeChat draft failed: {wx_err}")
         except Exception as e:
