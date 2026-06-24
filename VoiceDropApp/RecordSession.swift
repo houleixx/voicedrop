@@ -40,7 +40,10 @@ struct RecordSession: View {
             let granted = await AudioRecorder.ensurePermission()
             guard granted else { phase = .denied; return }
             location.start()
-            do { try recorder.start(); sessionStart = Date(); phase = .recording }
+            // Use the recorder's OWN start instant as the session id, so the photo
+            // folder key matches the audio filename to the second (don't take a
+            // separate Date() — it drifts across a second boundary).
+            do { try recorder.start(); sessionStart = recorder.startDate; phase = .recording }
             catch { phase = .failed("无法开始录音：\(error.localizedDescription)") }
         }
         .onDisappear { _ = recorder.stop() }

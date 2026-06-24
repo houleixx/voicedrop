@@ -33,7 +33,12 @@ final class AudioRecorder {
 
     private var recorder: AVAudioRecorder?
     private var currentURL: URL?
-    private var startDate: Date?
+    /// The recording's start instant — the SINGLE source of truth for this
+    /// session's timestamp. Both the audio filename (via `take.start`) and the
+    /// photo folder key derive from this exact value, so they always match to the
+    /// second. (Reading `Date()` separately for the photos drifted across a second
+    /// boundary and broke the audio↔photo correlation.)
+    private(set) var startDate: Date?
     private var tickTask: Task<Void, Never>?
 
     /// Called when a recording is finalized by an external interruption.

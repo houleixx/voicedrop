@@ -279,8 +279,10 @@ def _session_ts(audio_key):
 
 def find_session_photos(audio_key, all_names):
     """Return sorted list of full R2 photo keys for this audio session.
-    Photos live at users/<sub>/photos/<sessionTs>/<captureTs>.jpg and are
-    uploaded by the iOS app while the user is speaking."""
+    Photos live at users/<sub>/photos/<sessionTs>/<captureTs>.jpg, uploaded while
+    the user speaks. The folder ts equals the audio's session ts exactly — both
+    derive from the recorder's single start instant (see AudioRecorder.startDate),
+    so a plain prefix match is reliable."""
     prefix = _user_prefix(audio_key)
     ts = _session_ts(audio_key)
     if not ts:
@@ -289,11 +291,39 @@ def find_session_photos(audio_key, all_names):
     return sorted(n for n in all_names if n.startswith(folder) and n.lower().endswith(".jpg"))
 
 
+# Vision input is downscaled to this — a small thumbnail is plenty for the model
+# to describe a scene, and it cuts image tokens ~10× vs the stored 1080px photo
+# (≈137 tok at 320² vs ≈1555 tok at 1080²). The R2 photo stays full-size for the
+# app/web to display; only the copy SENT to Claude is shrunk.
+LLM_PHOTO_SIDE = int(os.environ.get("MINE_PHOTO_SIDE", "320"))
+
+
+def _downscale_jpeg(raw, max_side):
+    """Shrink JPEG bytes so the longest side ≤ max_side. Best-effort: if Pillow
+    isn't installed (e.g. the VPS relay, which never calls this), return as-is."""
+    try:
+        import io
+        from PIL import Image
+        im = Image.open(io.BytesIO(raw))
+        im.load()
+        if im.mode != "RGB":
+            im = im.convert("RGB")
+        if max(im.size) <= max_side:
+            return raw
+        im.thumbnail((max_side, max_side))
+        buf = io.BytesIO()
+        im.save(buf, format="JPEG", quality=80)
+        return buf.getvalue()
+    except Exception:
+        return raw
+
+
 def load_photo_b64(photo_key):
-    """Download a photo from R2 and return (base64_jpeg, human_time_label).
-    The label is derived from the capture timestamp in the filename."""
+    """Download a photo from R2, downscale it for vision, and return
+    (base64_jpeg, human_time_label). The label is from the capture timestamp."""
     raw = _req("GET", f"{BASE}/download/{quote(photo_key)}",
                headers={"Authorization": f"Bearer {TOKEN}"})
+    raw = _downscale_jpeg(raw, LLM_PHOTO_SIDE)
     b64 = base64.standard_b64encode(raw).decode("ascii")
     capture = os.path.basename(photo_key)[:-4]   # e.g. "2026-06-24-131523"
     parts = capture.split("-")
