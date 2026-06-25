@@ -46,14 +46,19 @@ struct RecordingDetailView: View {
     @State private var showingInsertPhoto = false
     @State private var hasSpokenOnce = false   // once set, editing toolbar stays visible until dismiss
 
-    // Undo/redo: a snapshot of version history loaded when the article is first
-    // opened (and refreshed after each agent edit). historyPosition moves through
-    // it: 0 = current, 1 = one-back, etc. Undo/redo call /revert and move the
-    // position; a new agent edit resets to 0 and refreshes the list.
-    @State private var versionHistory: [ArticleVersionEntry] = []
-    @State private var historyPosition: Int = 0
-    private var canUndo: Bool { historyPosition < versionHistory.count - 1 }
-    private var canRedo: Bool { historyPosition > 0 }
+    // Undo/redo: versions (oldest-first) + head loaded on open and refreshed after
+    // each agent edit. Undo/redo move head locally for instant UI update, then
+    // fire an async PATCH to sync the server pointer (no new version written).
+    @State private var versions: [ArticleVersionEntry] = []
+    @State private var head: Int = 0
+    private var canUndo: Bool {
+        guard let first = versions.first else { return false }
+        return head > first.v
+    }
+    private var canRedo: Bool {
+        guard let last = versions.last else { return false }
+        return head < last.v
+    }
     // Editing toolbar shows once the user has ever spoken, and stays until the view is dismissed.
     private var isEditing: Bool { hasSpokenOnce || dictation.isRecording || agent.state == .working }
 
@@ -120,8 +125,7 @@ struct RecordingDetailView: View {
         agent.onUpdate = { [self] newDoc in
             doc = newDoc
             articleIndex = min(articleIndex, max(0, newDoc.resolvedArticles.count - 1))
-            // A new agent edit invalidates any undo position — reset and refresh.
-            historyPosition = 0
+            // A new agent edit writes a new version; refresh history and reset to latest.
             Task { await loadVersionHistory() }
         }
         agent.onReply = { text, ok in
@@ -135,34 +139,36 @@ struct RecordingDetailView: View {
     }
 
     private func loadVersionHistory() async {
-        versionHistory = await store.fetchVersionHistory(recording)
-        // historyPosition stays put — only reset it when a new edit lands.
+        let h = await store.fetchVersionHistory(recording)
+        versions = h.versions
+        head = h.head
     }
 
-    private func performUndo() async {
-        guard canUndo else { return }
-        historyPosition += 1
-        let entry = versionHistory[historyPosition]
-        if let newDoc = await store.revertToVersion(recording, v: entry.v) {
-            doc = newDoc
-            articleIndex = min(articleIndex, max(0, newDoc.resolvedArticles.count - 1))
-        } else {
-            historyPosition -= 1
-            showToast("撤销失败")
-        }
+    private func performUndo() {
+        guard canUndo, let target = versions.last(where: { $0.v < head }) else { return }
+        head = target.v
+        applyVersion(target)
+        Task { await store.patchHead(recording, head: target.v) }
     }
 
-    private func performRedo() async {
-        guard canRedo else { return }
-        historyPosition -= 1
-        let entry = versionHistory[historyPosition]
-        if let newDoc = await store.revertToVersion(recording, v: entry.v) {
-            doc = newDoc
-            articleIndex = min(articleIndex, max(0, newDoc.resolvedArticles.count - 1))
-        } else {
-            historyPosition += 1
-            showToast("重做失败")
-        }
+    private func performRedo() {
+        guard canRedo, let target = versions.first(where: { $0.v > head }) else { return }
+        head = target.v
+        applyVersion(target)
+        Task { await store.patchHead(recording, head: target.v) }
+    }
+
+    private func applyVersion(_ entry: ArticleVersionEntry) {
+        guard var current = doc else { return }
+        // Patch only the articles array; all other metadata stays unchanged.
+        let patched = ArticleDoc(
+            id: current.id, sourceAudio: current.sourceAudio, createdAt: current.createdAt,
+            transcript: current.transcript, srt: current.srt,
+            articles: entry.articles,
+            photos: current.photos, title: current.title, body: current.body
+        )
+        doc = patched
+        articleIndex = min(articleIndex, max(0, patched.resolvedArticles.count - 1))
     }
 
 
@@ -220,7 +226,7 @@ struct RecordingDetailView: View {
                         .buttonStyle(.plain)
 
                         HStack(spacing: 0) {
-                            Button { Task { await performUndo() } } label: {
+                            Button { performUndo() } label: {
                                 Image(systemName: "arrow.uturn.backward")
                                     .font(.system(size: 15, weight: .medium))
                                     .foregroundStyle(canUndo ? Color(hex: "3A352E") : Color(hex: "C9BFB0"))
@@ -228,7 +234,7 @@ struct RecordingDetailView: View {
                             }
                             .buttonStyle(.plain).disabled(!canUndo)
                             Rectangle().fill(Theme.borderRead).frame(width: 1, height: 20)
-                            Button { Task { await performRedo() } } label: {
+                            Button { performRedo() } label: {
                                 Image(systemName: "arrow.uturn.forward")
                                     .font(.system(size: 15, weight: .medium))
                                     .foregroundStyle(canRedo ? Color(hex: "3A352E") : Color(hex: "C9BFB0"))

@@ -444,35 +444,40 @@ final class LibraryStore {
         } catch { return nil }
     }
 
-    /// Fetch the full version history for an article.
-    /// Returns newest-first: history[0] = current, history[1] = previous, etc.
-    func fetchVersionHistory(_ rec: Recording) async -> [ArticleVersionEntry] {
-        guard !token.isEmpty, rec.hasArticles else { return [] }
-        struct Resp: Decodable { let history: [ArticleVersionEntry] }
+    struct VersionHistory {
+        let versions: [ArticleVersionEntry]   // oldest-first
+        let head: Int
+    }
+
+    /// Fetch the full version history for an article (schema-3: {head, versions}).
+    func fetchVersionHistory(_ rec: Recording) async -> VersionHistory {
+        guard !token.isEmpty, rec.hasArticles else { return VersionHistory(versions: [], head: 0) }
+        struct Resp: Decodable { let head: Int; let versions: [ArticleVersionEntry] }
         let enc = rec.stem.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? rec.stem
-        guard let url = URL(string: "\(base.absoluteString)/articles/\(enc)/history") else { return [] }
+        guard let url = URL(string: "\(base.absoluteString)/articles/\(enc)/history") else { return VersionHistory(versions: [], head: 0) }
         var req = URLRequest(url: url)
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         do {
             let (data, resp) = try await URLSession.shared.data(for: req)
-            guard (resp as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) == true else { return [] }
-            return (try? JSONDecoder().decode(Resp.self, from: data))?.history ?? []
-        } catch { return [] }
+            guard (resp as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) == true else { return VersionHistory(versions: [], head: 0) }
+            guard let r = try? JSONDecoder().decode(Resp.self, from: data) else { return VersionHistory(versions: [], head: 0) }
+            return VersionHistory(versions: r.versions, head: r.head)
+        } catch { return VersionHistory(versions: [], head: 0) }
     }
 
-    /// Revert an article to a specific version number. Returns the new doc on success.
-    func revertToVersion(_ rec: Recording, v: Int) async -> ArticleDoc? {
-        guard !token.isEmpty, rec.hasArticles else { return nil }
+    /// Move the head pointer on the server (undo/redo sync). Fire-and-forget: returns
+    /// immediately after sending so the caller can update UI without waiting.
+    func patchHead(_ rec: Recording, head: Int) async {
+        guard !token.isEmpty, rec.hasArticles else { return }
         let enc = rec.stem.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? rec.stem
-        guard let url = URL(string: "\(base.absoluteString)/articles/\(enc)/revert/\(v)") else { return nil }
+        guard let url = URL(string: "\(base.absoluteString)/articles/\(enc)/head"),
+              let body = try? JSONEncoder().encode(["head": head]) else { return }
         var req = URLRequest(url: url)
-        req.httpMethod = "PUT"
+        req.httpMethod = "PATCH"
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        do {
-            let (_, resp) = try await URLSession.shared.data(for: req)
-            guard (resp as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) == true else { return nil }
-            return await fetchDoc(rec)
-        } catch { return nil }
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = body
+        _ = try? await URLSession.shared.data(for: req)
     }
 
     /// Download raw data for any relative key (used by ExportManager).
