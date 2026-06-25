@@ -418,6 +418,24 @@ final class LibraryStore {
         }
     }
 
+    /// Upload a square JPEG to the user's photo folder and return the relative key.
+    func uploadPhoto(data: Data, sessionTs: String, captureTs: String) async -> String? {
+        guard !token.isEmpty else { return nil }
+        let relKey = "photos/\(sessionTs)/\(captureTs).jpg"
+        let enc = relKey.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? relKey
+        guard let url = URL(string: "\(base.absoluteString)/upload/\(enc)") else { return nil }
+        var req = URLRequest(url: url)
+        req.httpMethod = "PUT"
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.setValue("image/jpeg", forHTTPHeaderField: "Content-Type")
+        req.httpBody = data
+        do {
+            let (_, resp) = try await URLSession.shared.data(for: req)
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            return (200..<300).contains(code) ? relKey : nil
+        } catch { return nil }
+    }
+
     /// Download raw data for any relative key (used by ExportManager).
     func downloadData(_ relName: String) async throws -> Data { try await get(relName) }
 

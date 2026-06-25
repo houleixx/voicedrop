@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import PhotosUI
 
 /// A transient one-line reply from the editing agent.
 struct AgentReply: Identifiable, Equatable {
@@ -41,12 +42,18 @@ struct RecordingDetailView: View {
     @State private var dictation = SpeechDictation()
     @State private var willCancel = false           // slid finger up past threshold
     @State private var connected = false
+    @State private var confirmDeleteFromDetail = false
+    @State private var showingInsertPhoto = false
 
     private var articles: [MinedArticle] { doc?.resolvedArticles ?? [] }
 
     var body: some View {
         VStack(spacing: 0) {
             navBar
+            if !articles.isEmpty {
+                editingToolbar
+                    .animation(.easeInOut(duration: 0.2), value: dictation.isRecording || agent.state == .working)
+            }
             if loadingDoc {
                 Spacer(); ProgressView().tint(Theme.accent); Spacer()
             } else if recording.isEmpty {
@@ -84,6 +91,15 @@ struct RecordingDetailView: View {
             }
         }) { WechatSettingsSheet(store: settings) }
         .sheet(item: $sharePayload) { ShareSheet(items: [$0.text]) }
+        .sheet(isPresented: $showingInsertPhoto) { SinglePhotoPicker(onPick: insertPhoto) }
+        .alert("删除这条录音？", isPresented: $confirmDeleteFromDetail) {
+            Button("删除", role: .destructive) {
+                Task { await store.delete(recording); dismiss() }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("音频和已挖出的文章都会从云端删除，不可恢复。")
+        }
     }
 
     /// Open the editing socket + ask for mic/speech once the article is loaded.
@@ -93,7 +109,6 @@ struct RecordingDetailView: View {
         agent.onUpdate = { newDoc in
             doc = newDoc
             articleIndex = min(articleIndex, max(0, newDoc.resolvedArticles.count - 1))
-            showToast("已更新")
         }
         agent.onReply = { text, ok in
             let reply = AgentReply(text: text, ok: ok)
@@ -102,6 +117,67 @@ struct RecordingDetailView: View {
         }
         agent.connect(recording)
         await dictation.requestAuth()
+    }
+
+    // MARK: Editing toolbar
+
+    @ViewBuilder private var editingToolbar: some View {
+        let isEditing = dictation.isRecording || agent.state == .working
+        if isEditing {
+            HStack(spacing: 16) {
+                Button { showingInsertPhoto = true } label: {
+                    VStack(spacing: 3) {
+                        Image(systemName: "photo.badge.plus").font(.system(size: 18))
+                        Text("插图").font(.system(size: 11))
+                    }
+                    .foregroundStyle(Theme.ink)
+                }
+                Button { showToast("暂未支持") } label: {
+                    VStack(spacing: 3) {
+                        Image(systemName: "arrow.uturn.backward").font(.system(size: 18))
+                        Text("撤销").font(.system(size: 11))
+                    }
+                    .foregroundStyle(Theme.ink)
+                }
+                Button { showToast("暂未支持") } label: {
+                    VStack(spacing: 3) {
+                        Image(systemName: "arrow.uturn.forward").font(.system(size: 18))
+                        Text("重做").font(.system(size: 11))
+                    }
+                    .foregroundStyle(Theme.ink)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16).padding(.vertical, 8)
+            .background(Theme.card)
+            .overlay(Rectangle().frame(height: 1).foregroundStyle(Theme.borderRead), alignment: .bottom)
+            .shadow(color: .black.opacity(0.06), radius: 4, x: 0, y: 2)
+            .transition(.move(edge: .top).combined(with: .opacity))
+        }
+    }
+
+    private func insertPhoto(_ image: UIImage) {
+        showingInsertPhoto = false
+        showToast("正在上传图片…")
+        Task {
+            // Extract sessionTs from recording stem: "VoiceDrop-2026-06-24-131500-..." → "2026-06-24-131500"
+            let parts = recording.stem.components(separatedBy: "-")
+            // parts[0]="VoiceDrop", parts[1]="2026", parts[2]="06", parts[3]="24", parts[4]="131500"
+            guard parts.count >= 5, parts[0] == "VoiceDrop" else { showToast("无法插入图片"); return }
+            let sessionTs = "\(parts[1])-\(parts[2])-\(parts[3])-\(parts[4])"
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyy-MM-dd-HHmmss"
+            let captureTs = formatter.string(from: Date())
+
+            guard let jpegData = SquareImage.jpeg(image, maxSide: 1080) else { showToast("图片处理失败"); return }
+            let relKey = await store.uploadPhoto(data: jpegData, sessionTs: sessionTs, captureTs: captureTs)
+            guard let relKey else { showToast("图片上传失败"); return }
+
+            // Send to the editing agent so it places the photo at the right position
+            let photoCount = doc?.photos?.count ?? 0
+            agent.enqueue("请将刚上传的照片 \(relKey) 加入文章，在最合适的位置插入[[photo:\(photoCount + 1)]]标记，并确保photos数组包含该key。如无法判断位置，放在结尾。")
+            showToast("图片已上传，AI正在插入…")
+        }
     }
 
     // MARK: Nav bar
@@ -125,6 +201,10 @@ struct RecordingDetailView: View {
                     Button { Task { await share() } } label: {
                         Label("分享", systemImage: "square.and.arrow.up")
                     }
+                    Divider()
+                    Button(role: .destructive) { confirmDeleteFromDetail = true } label: {
+                        Label("删除录音", systemImage: "trash")
+                    }
                 } label: {
                     RoundedRectangle(cornerRadius: Theme.R.nav)
                         .fill(Theme.ink)
@@ -142,11 +222,19 @@ struct RecordingDetailView: View {
     }
 
     private func share() async {
-        // Carry the on-screen selection (articleIndex) into the link so the public
-        // page previews and renders the section the user is actually looking at —
-        // not always the first one.
-        if let u = await store.shareURL(recording, section: articleIndex) { sharePayload = SharePayload(text: u.absoluteString) }
-        else { showToast("生成分享链接失败") }
+        // Build full text from ALL articles (all sections), strip photo markers
+        let allText = articles.enumerated().map { i, a in
+            let body = ArticleBody.stripMarkers(a.body)
+            return articles.count > 1 ? "【\(a.title)】\n\n\(body)" : "\(a.title)\n\n\(body)"
+        }.joined(separator: "\n\n---\n\n")
+
+        // Append the short link if we can get one
+        if let u = await store.shareURL(recording, section: articleIndex) {
+            sharePayload = SharePayload(text: allText + "\n\n" + u.absoluteString)
+        } else {
+            // Share text even without URL
+            sharePayload = SharePayload(text: allText)
+        }
     }
 
     private func toggleCommunity(_ visible: Bool) async {
@@ -671,6 +759,32 @@ struct PhotoTile: View {
                 guard let data = try? await store.downloadData(relKey) else { return }
                 image = UIImage(data: data)
             }
+    }
+}
+
+/// Minimal PHPicker wrapper that picks a single image for inline article insertion.
+struct SinglePhotoPicker: UIViewControllerRepresentable {
+    let onPick: (UIImage) -> Void
+    func makeUIViewController(context: Context) -> PHPickerViewController {
+        var config = PHPickerConfiguration()
+        config.selectionLimit = 1
+        config.filter = .images
+        let vc = PHPickerViewController(configuration: config)
+        vc.delegate = context.coordinator
+        return vc
+    }
+    func updateUIViewController(_ vc: PHPickerViewController, context: Context) {}
+    func makeCoordinator() -> Coordinator { Coordinator(onPick: onPick) }
+    class Coordinator: NSObject, PHPickerViewControllerDelegate {
+        let onPick: (UIImage) -> Void
+        init(onPick: @escaping (UIImage) -> Void) { self.onPick = onPick }
+        func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
+            picker.dismiss(animated: true)
+            guard let provider = results.first?.itemProvider, provider.canLoadObject(ofClass: UIImage.self) else { return }
+            provider.loadObject(ofClass: UIImage.self) { obj, _ in
+                if let img = obj as? UIImage { DispatchQueue.main.async { self.onPick(img) } }
+            }
+        }
     }
 }
 
