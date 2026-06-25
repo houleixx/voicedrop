@@ -225,26 +225,28 @@ struct RecordingDetailView: View {
                         }
                         .buttonStyle(.plain)
 
-                        HStack(spacing: 0) {
-                            Button { performUndo() } label: {
-                                Image(systemName: "arrow.uturn.backward")
-                                    .font(.system(size: 15, weight: .medium))
-                                    .foregroundStyle(canUndo ? Color(hex: "3A352E") : Color(hex: "C9BFB0"))
-                                    .frame(width: 38, height: 38)
+                        if versions.count > 1 {
+                            HStack(spacing: 0) {
+                                Button { performUndo() } label: {
+                                    Image(systemName: "arrow.uturn.backward")
+                                        .font(.system(size: 15, weight: .medium))
+                                        .foregroundStyle(canUndo ? Color(hex: "3A352E") : Color(hex: "C9BFB0"))
+                                        .frame(width: 38, height: 38)
+                                }
+                                .buttonStyle(.plain).disabled(!canUndo)
+                                Rectangle().fill(Theme.borderRead).frame(width: 1, height: 20)
+                                Button { performRedo() } label: {
+                                    Image(systemName: "arrow.uturn.forward")
+                                        .font(.system(size: 15, weight: .medium))
+                                        .foregroundStyle(canRedo ? Color(hex: "3A352E") : Color(hex: "C9BFB0"))
+                                        .frame(width: 38, height: 38)
+                                }
+                                .buttonStyle(.plain).disabled(!canRedo)
                             }
-                            .buttonStyle(.plain).disabled(!canUndo)
-                            Rectangle().fill(Theme.borderRead).frame(width: 1, height: 20)
-                            Button { performRedo() } label: {
-                                Image(systemName: "arrow.uturn.forward")
-                                    .font(.system(size: 15, weight: .medium))
-                                    .foregroundStyle(canRedo ? Color(hex: "3A352E") : Color(hex: "C9BFB0"))
-                                    .frame(width: 38, height: 38)
-                            }
-                            .buttonStyle(.plain).disabled(!canRedo)
+                            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.R.nav))
+                            .overlay(RoundedRectangle(cornerRadius: Theme.R.nav).stroke(Theme.borderRead, lineWidth: 1))
+                            .navButtonShadow()
                         }
-                        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.R.nav))
-                        .overlay(RoundedRectangle(cornerRadius: Theme.R.nav).stroke(Theme.borderRead, lineWidth: 1))
-                        .navButtonShadow()
                     }
                     .transition(.opacity.combined(with: .scale(scale: 0.95)))
                 } else {
