@@ -386,9 +386,9 @@ struct RecordingDetailView: View {
         }
     }
 
-    /// Flatten the body (text + `[[photo:N]]` markers + trailing photos) into a
-    /// numbered row list: paragraphs counted 第1/2/3…行 by real line breaks, images
-    /// counted 图1/2/3… by appearance. These are the locators the user speaks to.
+    /// Flatten the body (text + `[[photo:N]]` markers) into a numbered row list:
+    /// paragraphs counted 第1/2/3…行 by real line breaks, images counted 图1/2/3…
+    /// by appearance. Photos with no marker in the body are simply not shown.
     private func bodyRows(_ a: MinedArticle) -> [BodyRow] {
         let photos = doc?.photos ?? []
         let segments = ArticleBody.segments(a.body)
@@ -406,10 +406,6 @@ struct RecordingDetailView: View {
             case .photo(let n):
                 if let key = photos[safe: n - 1] { imgNo += 1; rows.append(.image(imgNo, key)) }
             }
-        }
-        let placed = Set(segments.compactMap { if case .photo(let n) = $0 { return n } else { return nil } })
-        for i in photos.indices where !placed.contains(i + 1) {
-            imgNo += 1; rows.append(.image(imgNo, photos[i]))
         }
         return rows
     }
