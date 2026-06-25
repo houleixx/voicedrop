@@ -3,13 +3,13 @@ import Observation
 
 /// Maintains a persistent WebSocket to wss://jianshuo.dev/agent/status and
 /// delivers real-time mining status updates to the app. mine.py pushes a
-/// notification when it starts or finishes processing a recording, so the UI
-/// can flip between 待处理 / 处理中 / 已成文 without polling.
+/// notification at each phase of a recording, so the UI can flip between
+/// 待处理 / 听录音 / 挖文章 / 已成文 / 无语音 without polling.
 @MainActor
 @Observable
 final class StatusSession {
-    var onProcessing: ((String) -> Void)?   // stem that started processing
-    var onDone: ((String) -> Void)?         // stem that finished (ready or empty)
+    var onPhase: ((String, String) -> Void)?   // (stem, phase) — phase ∈ {asr, mining}
+    var onDone: ((String) -> Void)?            // stem that finished (ready or empty)
 
     private var task: URLSessionWebSocketTask?
     private var urlSession: URLSession?
@@ -62,7 +62,8 @@ final class StatusSession {
               let stem = obj["stem"] as? String,
               let status = obj["status"] as? String else { return }
         switch status {
-        case "processing": onProcessing?(stem)
+        case "asr", "mining": onPhase?(stem, status)
+        case "processing": onPhase?(stem, "mining")   // legacy single-phase signal
         case "ready", "empty": onDone?(stem)
         default: break
         }

@@ -89,6 +89,12 @@ enum ArticleBody {
     }
 }
 
+/// Which phase of mining a recording is in (pushed live by mine.py over the
+/// status WebSocket). Drives the in-flight badge label.
+enum MiningPhase: String { case asr, mining
+    var badge: String { self == .asr ? "听录音" : "挖文章" }
+}
+
 /// A recording as seen in the user's R2 space: the audio key plus whether the
 /// miner has produced an article JSON for it yet.
 struct Recording: Identifiable, Hashable {
@@ -98,7 +104,9 @@ struct Recording: Identifiable, Hashable {
     let isEmpty: Bool            // a `articles/<stem>.empty` marker exists (no usable speech)
     var articleTitle: String?    // first mined article's title; fills the place slot once 已成文
     var uploading: Bool = false  // a local take still in the upload queue (not yet on the server)
-    var processing: Bool = false // server is actively mining this right now (WebSocket push)
+    var phase: MiningPhase? = nil // server is actively mining this right now (WebSocket push); nil = not in-flight
+
+    var processing: Bool { phase != nil }
 
     var id: String { audioName }
     var stem: String { String(audioName.dropLast(4)) }          // strip .m4a
@@ -152,24 +160,25 @@ final class LibraryStore {
     private let base = URL(string: "https://jianshuo.dev/files/api")!
     private var token: String { AuthStore.shared.bearer }
     private var titleCache: [String: String] = [:]   // articleKey -> first article title
-    private var processingStems: Set<String> = []    // stems currently being mined (WebSocket)
+    private var processingPhase: [String: MiningPhase] = [:]   // stem -> current mining phase (WebSocket)
 
     private struct ListResponse: Decodable {
         struct Item: Decodable { let name: String; let uploaded: String? }
         let files: [Item]
     }
 
-    /// Called by StatusSession when mine.py signals it started processing a stem.
-    func markProcessing(stem: String) {
-        processingStems.insert(stem)
+    /// Called by StatusSession when mine.py signals a stem advanced to a phase (asr / mining).
+    func markPhase(stem: String, phase rawPhase: String) {
+        guard let phase = MiningPhase(rawValue: rawPhase) else { return }
+        processingPhase[stem] = phase
         if let idx = recordings.firstIndex(where: { $0.stem == stem }), !recordings[idx].hasArticles {
-            recordings[idx].processing = true
+            recordings[idx].phase = phase
         }
     }
 
     /// Called by StatusSession when a stem is done (ready or empty). Refreshes the list.
     func markDone(stem: String) {
-        processingStems.remove(stem)
+        processingPhase[stem] = nil
         Task { await load() }
     }
 
@@ -203,11 +212,11 @@ final class LibraryStore {
             // that are now done (article or empty marker already landed in R2).
             for i in recordings.indices {
                 let stem = recordings[i].stem
-                if processingStems.contains(stem) {
+                if let ph = processingPhase[stem] {
                     if recordings[i].hasArticles || recordings[i].isEmpty {
-                        processingStems.remove(stem)   // done — clear the in-flight marker
+                        processingPhase[stem] = nil   // done — clear the in-flight marker
                     } else {
-                        recordings[i].processing = true
+                        recordings[i].phase = ph
                     }
                 }
             }

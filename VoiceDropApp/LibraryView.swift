@@ -78,7 +78,7 @@ struct LibraryView: View {
             RecordSession { showRecord = false; Task { await refresh() } }
         }
         .task {
-            statusSession.onProcessing = { stem in store.markProcessing(stem: stem) }
+            statusSession.onPhase = { stem, phase in store.markPhase(stem: stem, phase: phase) }
             statusSession.onDone = { stem in store.markDone(stem: stem) }
             statusSession.connect()
             await refresh()
@@ -286,10 +286,10 @@ struct LibraryView: View {
                 .onLongPressGesture { confirmReprocess = rec }
         } else if rec.isEmpty {
             badge(Theme.faint, "无语音")
-        } else if rec.processing {
+        } else if let phase = rec.phase {
             HStack(spacing: 5) {
                 ProgressView().controlSize(.mini).tint(Theme.accent)
-                Text("处理中").font(.system(size: 12.5)).foregroundStyle(Theme.accent)
+                Text(phase.badge).font(.system(size: 12.5)).foregroundStyle(Theme.accent)
             }
         } else {
             badge(Theme.amberPending, "待处理")

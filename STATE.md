@@ -129,9 +129,11 @@ app's existing tokens) + `CLAUDE_API_KEY`. Two Durable Objects (`agent/src/index
   detail view reloads it in place. Mic UI: the mic button itself becomes the animated "正在改" indicator
   and queued instructions stack above it (`RecordingDetailView.swift`).
 - **`StatusHub`** (`wss://…/agent/status`, one instance per user `status:<scope>`) — real-time mining
-  status. `mine.py` POSTs `POST /agent/notify` (auth `FILES_TOKEN`) when a recording starts/finishes;
-  the hub broadcasts `{type:"status_update",stem,status}` to that user's app sockets, so rows flip
-  **待处理 → 处理中 → 已成文** with no polling (`StatusSession.swift`, `LibraryStore.markProcessing/markDone`).
+  status. `mine.py` POSTs `POST /agent/notify` (auth `FILES_TOKEN`) at each mining phase; the hub
+  broadcasts `{type:"status_update",stem,status}` (status ∈ `asr|mining|ready|empty`, passed through
+  verbatim — no whitelist) to that user's app sockets, so rows flip **待处理 → 听录音 → 挖文章 → 已成文**
+  (or → 无语音) with no polling (`StatusSession.swift` `onPhase/onDone`, `LibraryStore.markPhase/markDone`).
+  Phases map to badges in `MiningPhase` (`asr`=听录音, `mining`=挖文章).
 
 Secrets (`wrangler secret put`): `SESSION_SECRET` (same value as Pages — verifies Apple JWTs;
 anon tokens work without it), `CLAUDE_API_KEY`, **`FILES_TOKEN`** (= Pages FILES_TOKEN; authenticates
@@ -159,7 +161,8 @@ Home is **`LibraryView.swift`** (`RootView.swift` → `NavigationStack`) — a w
 tabs **我的录音 / VD社区**, a docked **pure-red record key** (→ full-screen recording takeover), and a
 gear → **设置** (redesign "方案二"; the old `ContentView` 3-tab `TabView` is superseded).
 - **我的录音** `LibraryView` + `Library.swift` (`LibraryStore`) — recording list with live badges
-  **待处理 / 处理中 / 已成文 / 无语音**. 处理中 is pushed via `StatusSession` (no polling); a just-uploaded
+  **待处理 / 听录音 / 挖文章 / 已成文 / 无语音** (the two in-flight phases 听录音→挖文章 replace the old single
+  处理中, both animated spinners). Phases are pushed via `StatusSession` (no polling); a just-uploaded
   take shows an **optimistic 待处理** row immediately (same `audioName` = same row id, so the badge changes
   in place — no disappear/flicker). 已成文 rows show the **article title** (concurrent fetch, cached by
   articleKey). Swipe-left → red **删除整条录音** (optimistic). **Easter egg**: long-press the 已成文 badge →

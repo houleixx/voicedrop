@@ -621,8 +621,10 @@ def fetch_claude_md(audio_key):
 
 def notify(audio_key, status):
     """Fire-and-forget: push a status change to the user's StatusHub so the app
-    can update in real-time without polling. Non-fatal — a failed notify just
-    means the app stays on the old badge until the next manual refresh."""
+    can update in real-time without polling. status ∈ {asr, mining, ready, empty}
+    → badges 听录音 / 挖文章 / 已成文 / 无语音 (待处理 is the app's pre-pickup state).
+    Non-fatal — a failed notify just means the app stays on the old badge until
+    the next manual refresh."""
     scope = _user_prefix(audio_key)
     stem = os.path.basename(audio_key)
     if stem.endswith(".m4a"):
@@ -865,7 +867,7 @@ def main():
         if api_exists(article_key_for(audio)) or api_exists(empty_key_for(audio)):
             log(f"   skip (article exists — list was truncated or lagged)")
             continue
-        notify(audio, "processing")   # app: 待处理 → 处理中
+        notify(audio, "asr")   # app: 待处理 → 听录音
         try:
             t = time.time()
             transcript, srt = transcribe(audio, timeout_s=600)
@@ -888,6 +890,7 @@ def main():
                 notify(audio, "empty")
                 continue
 
+            notify(audio, "mining")   # app: 听录音 → 挖文章
             claude_md = fetch_claude_md(audio)
             if claude_md:
                 log(f"   + CLAUDE.md ({len(claude_md)} chars)")
