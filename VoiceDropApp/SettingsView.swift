@@ -26,8 +26,6 @@ final class SettingsStore {
     var saved = false
     var error: String?
 
-    var selectedModel = "claude-sonnet-4-6"
-
     var wechatEnabled = false
     var wechatAppId = ""
     var wechatSecret = ""
@@ -38,7 +36,6 @@ final class SettingsStore {
     private(set) var wechatThumbMediaId = ""
 
     private let base = URL(string: "https://jianshuo.dev/files/api")!
-    private let agentBase = URL(string: "https://jianshuo.dev/agent")!
     private var token: String { AuthStore.shared.bearer }
 
     func compose() -> String {
@@ -72,28 +69,6 @@ final class SettingsStore {
             let parsed = Self.parse(String(decoding: data, as: UTF8.self))
             name = parsed.name; style = parsed.style
         } catch { self.error = error.localizedDescription }
-    }
-
-    func loadModel() async {
-        guard !token.isEmpty else { return }
-        var req = URLRequest(url: agentBase.appending(path: "settings"))
-        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        if let (data, resp) = try? await URLSession.shared.data(for: req),
-           (resp as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) == true,
-           let obj = try? JSONDecoder().decode([String: String].self, from: data),
-           let m = obj["model"] {
-            selectedModel = m
-        }
-    }
-
-    func saveModel(_ model: String) async {
-        guard !token.isEmpty else { return }
-        var req = URLRequest(url: agentBase.appending(path: "settings"))
-        req.httpMethod = "POST"
-        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let body = try? JSONEncoder().encode(["model": model])
-        _ = try? await URLSession.shared.upload(for: req, from: body ?? Data())
     }
 
     func articlesPageURL() async throws -> URL {
@@ -345,24 +320,6 @@ struct SettingsView: View {
                         }
                     }
 
-                    group("AI 模型") {
-                        SettingsCard {
-                            SettingsRow(tileBG: Theme.tileNeutral, symbol: "cpu", tileFG: Theme.secondary,
-                                        title: "使用模型", subtitle: "挖文章和编辑时使用的 Claude 模型") {
-                                Picker("使用模型", selection: $store.selectedModel) {
-                                    Text("Sonnet 4.6（默认）").tag("claude-sonnet-4-6")
-                                    Text("Opus 4.8（更强）").tag("claude-opus-4-8")
-                                    Text("Haiku 4.5（更快）").tag("claude-haiku-4-5-20251001")
-                                }
-                                .pickerStyle(.menu)
-                                .labelsHidden()
-                                .onChange(of: store.selectedModel) { _, m in
-                                    Task { await store.saveModel(m) }
-                                }
-                            }
-                        }
-                    }
-
                     group("同步与存储") {
                         SettingsCard {
                             SettingsRow(tileBG: Theme.tileNeutral, symbol: "icloud", tileFG: Theme.secondary,
@@ -398,7 +355,7 @@ struct SettingsView: View {
         }
         .background(Theme.appBG.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
-        .task { await store.load(); await store.loadWechat(); await store.loadModel() }
+        .task { await store.load(); await store.loadWechat() }
         .sheet(isPresented: $showWechat) { WechatSettingsSheet(store: store) }
         .sheet(isPresented: $showStyle) { WritingStyleSheet(store: store) }
         .sheet(isPresented: $showingExport, onDismiss: { exportManager.reset() }) {
