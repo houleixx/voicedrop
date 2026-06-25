@@ -32,12 +32,11 @@ Credentials (env):
 
 Optional:
   R2_BUCKET  (default: jianshuo-dev-files)
-
-No third-party deps: the R2 presign is a hand-rolled AWS SigV4 query signature
-and the HTTP calls go through urllib — so CI needs no boto3/requests install.
 """
-import sys, os, json, uuid, time, hmac, hashlib, datetime
-import urllib.request, urllib.error, urllib.parse
+import sys, os, json, uuid, time
+import boto3
+from botocore.config import Config
+import requests
 
 APPID  = os.environ.get("VOLC_ASR_APPID") or os.environ["VOLC_APPID"]
 TOKEN  = os.environ.get("VOLC_ASR_ACCESS_TOKEN") or os.environ["VOLC_TOKEN"]
@@ -64,62 +63,20 @@ class AsrFail(Exception):
         self.code = str(code)
 
 
-def _sign(key, msg):
-    return hmac.new(key, msg.encode("utf-8"), hashlib.sha256).digest()
-
-
 def presign(key, expires=3600):
-    """Hand-rolled AWS SigV4 presigned GET URL for an R2 (path-style) object.
-    Equivalent to boto3 generate_presigned_url('get_object', ...)."""
-    host    = f"{R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
-    region  = "auto"
-    service = "s3"
-    now = datetime.datetime.now(datetime.timezone.utc)
-    amz_date  = now.strftime("%Y%m%dT%H%M%SZ")
-    datestamp = now.strftime("%Y%m%d")
-
-    # path-style: host has no bucket, the path carries bucket + key
-    canonical_uri = "/" + R2_BUCKET + "/" + urllib.parse.quote(key, safe="/")
-    credential_scope = f"{datestamp}/{region}/{service}/aws4_request"
-
-    query = {
-        "X-Amz-Algorithm":     "AWS4-HMAC-SHA256",
-        "X-Amz-Credential":    f"{R2_ACCESS_KEY_ID}/{credential_scope}",
-        "X-Amz-Date":          amz_date,
-        "X-Amz-Expires":       str(expires),
-        "X-Amz-SignedHeaders": "host",
-    }
-    canonical_qs = "&".join(
-        f"{urllib.parse.quote(k, safe='')}={urllib.parse.quote(v, safe='')}"
-        for k, v in sorted(query.items())
+    s3 = boto3.client(
+        "s3",
+        endpoint_url=f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com",
+        aws_access_key_id=R2_ACCESS_KEY_ID,
+        aws_secret_access_key=R2_SECRET_ACCESS_KEY,
+        config=Config(signature_version="s3v4"),
+        region_name="auto",
     )
-    canonical_request = "\n".join([
-        "GET", canonical_uri, canonical_qs,
-        f"host:{host}\n", "host", "UNSIGNED-PAYLOAD",
-    ])
-    string_to_sign = "\n".join([
-        "AWS4-HMAC-SHA256", amz_date, credential_scope,
-        hashlib.sha256(canonical_request.encode("utf-8")).hexdigest(),
-    ])
-    k_date    = _sign(("AWS4" + R2_SECRET_ACCESS_KEY).encode("utf-8"), datestamp)
-    k_region  = _sign(k_date, region)
-    k_service = _sign(k_region, service)
-    k_signing = _sign(k_service, "aws4_request")
-    signature = hmac.new(k_signing, string_to_sign.encode("utf-8"),
-                         hashlib.sha256).hexdigest()
-    return f"https://{host}{canonical_uri}?{canonical_qs}&X-Amz-Signature={signature}"
-
-
-def _post(url, body, headers):
-    """POST JSON via urllib; returns (http_status, response_headers, text).
-    Never raises on 4xx/5xx — the body/headers carry the API's own status."""
-    data = json.dumps(body).encode("utf-8")
-    req = urllib.request.Request(url, data=data, headers=headers, method="POST")
-    try:
-        resp = urllib.request.urlopen(req, timeout=30)
-        return resp.status, resp.headers, resp.read().decode("utf-8", "replace")
-    except urllib.error.HTTPError as e:
-        return e.code, e.headers, e.read().decode("utf-8", "replace")
+    return s3.generate_presigned_url(
+        "get_object",
+        Params={"Bucket": R2_BUCKET, "Key": key},
+        ExpiresIn=expires,
+    )
 
 
 def submit(audio_url):
@@ -144,13 +101,14 @@ def submit(audio_url):
             "show_utterances": True,
         },
     }
-    http_status, resp_headers, text = _post(SUBMIT_URL, body, hdrs)
-    status_code = resp_headers.get("X-Api-Status-Code", "")
+    r = requests.post(SUBMIT_URL, json=body, headers=hdrs, timeout=30)
+    r.raise_for_status()
+    status_code = r.headers.get("X-Api-Status-Code", "")
     if status_code != str(STATUS_DONE):
-        print(f"Submit: HTTP {http_status} status={status_code} body={text[:200]}",
+        print(f"Submit: HTTP {r.status_code} status={status_code} body={r.text[:200]}",
               file=sys.stderr)
-        raise AsrFail(status_code or f"submit-http-{http_status}")
-    logid = resp_headers.get("X-Tt-Logid", "")
+        raise AsrFail(status_code or f"submit-http-{r.status_code}")
+    logid = r.headers.get("X-Tt-Logid", "")
     print(f"[asr] submitted task={task_id[:8]}…", file=sys.stderr)
     return task_id, logid
 
@@ -167,9 +125,11 @@ def poll(task_id, logid, deadline):
         "Content-Type":      "application/json",
     }
     while time.time() < deadline:
-        http_status, resp_headers, text = _post(QUERY_URL, {"task_id": task_id}, hdrs)
-        status = resp_headers.get("X-Api-Status-Code", "")
-        res = json.loads(text) if text.strip() else {}
+        r = requests.post(QUERY_URL, json={"task_id": task_id},
+                          headers=hdrs, timeout=30)
+        r.raise_for_status()
+        status = r.headers.get("X-Api-Status-Code", "")
+        res = json.loads(r.text) if r.text.strip() else {}
         # Done detection (observed body shapes, captured from live runs):
         #   processing → {"audio_info":{}, "result":{"text":""}}   (empty audio_info)
         #   done       → {"audio_info":{"duration":N}, "result":{...}}
@@ -183,7 +143,7 @@ def poll(task_id, logid, deadline):
         # Hard error: status header present and not a known in-progress code.
         # This is deterministic for the audio (same code on every re-run).
         if status and status not in (str(STATUS_QUEUED), str(STATUS_PROCESSING)):
-            print(f"ASR error status={status} body={text[:200]}", file=sys.stderr)
+            print(f"ASR error status={status} body={r.text[:200]}", file=sys.stderr)
             raise AsrFail(status)
         time.sleep(2)
     print("ASR timed out", file=sys.stderr)
