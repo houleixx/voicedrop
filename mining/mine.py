@@ -673,12 +673,22 @@ def build_srt(utterances):
 
 
 EMPTY_ASR_EXIT = 3   # volc_asr_file.py: empty / silent audio
+ASR_FAIL_EXIT  = 4   # volc_asr_file.py: deterministic ASR error (don't retry)
+
+
+class AsrError(RuntimeError):
+    """火山在识别阶段返回确定性业务错误码（如 45000151）——这段音频每次重试都是
+    同样的码，重试无用。带上错误码，让上层把它标记成已处理、停止重试。"""
+    def __init__(self, code):
+        super().__init__(f"ASR deterministic error {code}")
+        self.code = str(code)
 
 
 def transcribe(audio_key, timeout_s):
     """Return (plain_transcript, srt_string).
     Submits the R2 key to the file-recognition API (no local download needed).
-    Returns ('', '') for empty/silent audio; raises on hard failure."""
+    Returns ('', '') for empty/silent audio; raises AsrError for a deterministic
+    Volcano error (don't retry) and RuntimeError for transient failures (retry)."""
     fd, out = tempfile.mkstemp(suffix=".asr.json")
     os.close(fd)
     try:
@@ -689,6 +699,13 @@ def transcribe(audio_key, timeout_s):
             raise RuntimeError(f"ASR timed out after {timeout_s}s")
         if p.returncode == EMPTY_ASR_EXIT:
             return "", ""
+        if p.returncode == ASR_FAIL_EXIT:
+            code = ""
+            try:
+                code = json.load(open(out)).get("asr_error_code", "")
+            except Exception:
+                pass
+            raise AsrError(code)
         if p.returncode != 0:
             raise RuntimeError(f"ASR failed (exit {p.returncode})")
         res = json.load(open(out)).get("result", {})
@@ -870,7 +887,18 @@ def main():
         notify(audio, "asr")   # app: 待处理 → 听录音
         try:
             t = time.time()
-            transcript, srt = transcribe(audio, timeout_s=600)
+            try:
+                transcript, srt = transcribe(audio, timeout_s=600)
+            except AsrError as ae:
+                # Deterministic Volcano failure — this audio will never transcribe.
+                # Mark it processed (无语音) so it's never re-mined, and move on.
+                tot_asr += time.time() - t
+                write_empty(audio, f"asr-error:{ae.code}")
+                empty += 1
+                log(f"   ✗ ASR 确定性失败 {ae.code} → 标记无语音，不再重试 "
+                    f"(total {time.time()-rec_t0:.1f}s)")
+                notify(audio, "empty")
+                continue
             asr = time.time() - t; tot_asr += asr
             log(f"   ASR → {len(transcript)} chars ({asr:.1f}s)")
 

@@ -14,7 +14,11 @@ Protocol notes (different from what the docs describe):
 Same exit-code contract as the old volc_asr_stream.py:
   0  → success, result written to <out.json>
   3  → empty / silent audio (EMPTY_ASR_EXIT)
-  1  → other failure
+  4  → deterministic ASR failure (ASR_FAIL_EXIT): Volcano returned a business
+       error code for THIS audio — re-running gets the same code, so the caller
+       should mark it processed and stop retrying. The code is written to
+       <out.json> as {"asr_error_code": "..."} so the miner can record it.
+  1  → other / transient failure (network, timeout) — safe to retry
 
 Usage:
   volc_asr_file.py <r2-key> <out.json>
@@ -45,10 +49,19 @@ R2_BUCKET = os.environ.get("R2_BUCKET", "jianshuo-dev-files")
 SUBMIT_URL   = "https://openspeech.bytedance.com/api/v3/auc/bigmodel/submit"
 QUERY_URL    = "https://openspeech.bytedance.com/api/v3/auc/bigmodel/query"
 EMPTY_ASR_EXIT = 3
+ASR_FAIL_EXIT  = 4   # deterministic ASR business error → don't retry
 
 STATUS_DONE       = 20000000
 STATUS_QUEUED     = 20000001
 STATUS_PROCESSING = 20000002
+
+
+class AsrFail(Exception):
+    """Volcano returned a deterministic business error for this audio — re-running
+    yields the same code. Carries the code so the miner can stop retrying."""
+    def __init__(self, code):
+        super().__init__(f"deterministic ASR failure: {code}")
+        self.code = str(code)
 
 
 def _sign(key, msg):
@@ -136,7 +149,7 @@ def submit(audio_url):
     if status_code != str(STATUS_DONE):
         print(f"Submit: HTTP {http_status} status={status_code} body={text[:200]}",
               file=sys.stderr)
-        sys.exit(1)
+        raise AsrFail(status_code or f"submit-http-{http_status}")
     logid = resp_headers.get("X-Tt-Logid", "")
     print(f"[asr] submitted task={task_id[:8]}…", file=sys.stderr)
     return task_id, logid
@@ -168,9 +181,10 @@ def poll(task_id, logid, deadline):
                 or res.get("result", {}).get("text", "").strip()):
             return res
         # Hard error: status header present and not a known in-progress code.
+        # This is deterministic for the audio (same code on every re-run).
         if status and status not in (str(STATUS_QUEUED), str(STATUS_PROCESSING)):
             print(f"ASR error status={status} body={text[:200]}", file=sys.stderr)
-            sys.exit(1)
+            raise AsrFail(status)
         time.sleep(2)
     print("ASR timed out", file=sys.stderr)
     sys.exit(1)
@@ -184,8 +198,19 @@ def main():
     key, out_path = sys.argv[1], sys.argv[2]
 
     url = presign(key)
-    task_id, logid = submit(url)
-    res = poll(task_id, logid, time.time() + 600)
+    try:
+        task_id, logid = submit(url)
+        res = poll(task_id, logid, time.time() + 600)
+    except AsrFail as e:
+        # Deterministic failure: hand the code back to the miner so it can mark
+        # the recording processed (no-retry) instead of failing forever.
+        try:
+            with open(out_path, "w", encoding="utf-8") as f:
+                json.dump({"asr_error_code": e.code}, f)
+        except Exception:
+            pass
+        print(f"ASR deterministic failure code={e.code}", file=sys.stderr)
+        sys.exit(ASR_FAIL_EXIT)
 
     result = res.get("result", {})
     utts = result.get("utterances", [])
