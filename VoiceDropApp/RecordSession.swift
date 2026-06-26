@@ -96,18 +96,23 @@ struct RecordSession: View {
                 .padding(.bottom, 26)
             }
 
-            // Hidden photo trigger: tap the right-side empty area next to the stop button.
-            // Uses AVCaptureSession (video-only) so recording is not interrupted.
+            // Faint photo trigger: a very subtle camera icon in the bottom-right
+            // corner — discoverable but unobtrusive. Same tap target/position as the
+            // old invisible area, so nothing else shifts. Uses AVCaptureSession
+            // (video-only) so recording is not interrupted.
             VStack {
                 Spacer()
                 HStack {
                     Spacer()
-                    Color.clear
+                    Image(systemName: "camera")
+                        .font(.system(size: 26, weight: .light))
+                        .foregroundStyle(Theme.faint.opacity(0.5))
                         .frame(width: 110, height: 120)
                         .contentShape(Rectangle())
                         .onTapGesture { Task { await openCamera() } }
                         .padding(.trailing, 16)
                         .padding(.bottom, 10)
+                        .accessibilityLabel("拍照")
                 }
             }
         }

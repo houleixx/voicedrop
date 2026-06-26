@@ -185,9 +185,11 @@ gear → **设置** (redesign "方案二"; the old `ContentView` 3-tab `TabView`
 - **VD社区** — see the Community section above.
 - **录音 (takeover)** `RecordSession.swift` — full-screen, opens **idle** (tap-to-record). Records to a
   **staging name** `recording-<ts>.m4a`, promoted to the enriched `VoiceDrop-*` name only after finalize
-  → fixes the moov-less/0-byte corrupt-upload race; uploads on finish. **Hidden 拍照 (testing-only):** a
-  transparent 110×120 tap area right of the stop button opens a full-screen camera (`PhotoCapture.swift`,
-  `AVCaptureSession` video-only so recording is NOT interrupted). Design = "Photo Capture.dc.html". **Square
+  → fixes the moov-less/0-byte corrupt-upload race; uploads on finish. **Faint 拍照 trigger:** a **very subtle
+  `camera` SF Symbol** (`Theme.faint` @ 0.5 opacity, no circle/label) in the bottom-right corner — discoverable
+  but unobtrusive; same 110×120 tap target/position as the old invisible area (so the 停止 key never shifts).
+  Tapping opens a full-screen camera (`PhotoCapture.swift`,
+  `AVCaptureSession` video-only so recording is NOT interrupted). Camera design = "Photo Capture.dc.html". **Square
   viewfinder** (rule-of-thirds grid + border + empty-state hint), top bar = live "● 录音中 · MM:SS" (or
   "已拍 N 张" pill once shots exist) + a **完成** button (gray→orange) that closes and uploads. Bottom bar =
   photo-library import (left, `PHPickerViewController`, multi-select≤9, no permission prompt), shutter
