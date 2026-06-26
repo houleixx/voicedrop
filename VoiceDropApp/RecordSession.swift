@@ -123,7 +123,6 @@ struct RecordSession: View {
             }
             .frame(maxWidth: .infinity)   // 拍照 centered in the right blank area
         }
-        .padding(.top, 14)
         .padding(.bottom, 26)
     }
 
