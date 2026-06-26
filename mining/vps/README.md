@@ -12,8 +12,9 @@ GitHub-Action dispatch.
 - **Reachable only via a Cloudflare Tunnel** (`wechat-pub.jianshuo.dev` →
   `127.0.0.1:8848`). No open inbound port. Every request needs
   `X-Relay-Secret: $WECHAT_RELAY_SECRET` (constant-time check).
-- Reuses `mine.py` verbatim (stdlib only). `tinyproxy` on this box is unrelated and
-  stays as-is (still used by the GitHub-Actions `mine.yml` auto-push path).
+- **Self-contained** `relay_server.py` (stdlib only) — the WeChat + cover helpers it
+  once `import`ed from `mine.py` are now inlined; `mine.py` is gone. `tinyproxy` on
+  this box is unrelated and stays as-is.
 
 ## First-time setup
 

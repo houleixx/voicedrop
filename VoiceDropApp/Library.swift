@@ -109,8 +109,8 @@ enum ArticleBody {
     }
 }
 
-/// Which phase of mining a recording is in (pushed live by mine.py over the
-/// status WebSocket). Drives the in-flight badge label.
+/// Which phase of mining a recording is in (pushed live by the Worker miner over
+/// the status WebSocket). Drives the in-flight badge label.
 enum MiningPhase: String { case asr, mining
     var badge: String { self == .asr ? "听录音" : "挖文章" }
 }
@@ -187,7 +187,7 @@ final class LibraryStore {
         let files: [Item]
     }
 
-    /// Called by StatusSession when mine.py signals a stem advanced to a phase (asr / mining).
+    /// Called by StatusSession when the Worker miner signals a stem advanced to a phase (asr / mining).
     func markPhase(stem: String, phase rawPhase: String) {
         guard let phase = MiningPhase(rawValue: rawPhase) else { return }
         processingPhase[stem] = phase
@@ -342,7 +342,7 @@ final class LibraryStore {
 
     /// Delete only the generated article + every marker (json/srt/empty), keeping
     /// the audio, then kick the miner so it re-mines this recording right away
-    /// (the marker is gone → mine.py treats it as unprocessed). The row flips back
+    /// (the marker is gone → the miner treats it as unprocessed). The row flips back
     /// to 待处理 → 听录音 → 挖文章 → 已成文 with fresh content. Reloads to reflect state.
     @discardableResult
     func deleteArticle(_ rec: Recording) async -> Bool {

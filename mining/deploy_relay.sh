@@ -10,12 +10,14 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 echo "→ ensure $DEST on $VPS_SSH"
 ssh "$VPS_SSH" "mkdir -p $DEST"
 echo "→ rsync relay files"
+# relay_server.py is self-contained now (the old mine.py dependency was inlined).
 rsync -avz \
-  "$HERE/mine.py" \
   "$HERE/relay_server.py" \
   "$HERE/vps/wechat-relay.service" \
   "$HERE/vps/provision.sh" \
   "$VPS_SSH:$DEST/"
+echo "→ drop stale mine.py (no longer used) + refresh systemd unit"
+ssh "$VPS_SSH" "rm -f $DEST/mine.py; cp $DEST/wechat-relay.service /etc/systemd/system/wechat-relay.service 2>/dev/null && systemctl daemon-reload || true"
 echo "→ restart + health check"
 ssh "$VPS_SSH" 'if systemctl list-unit-files | grep -q "^wechat-relay.service"; then
     systemctl restart wechat-relay && sleep 1 && systemctl is-active wechat-relay && curl -fsS http://127.0.0.1:8848/health && echo;

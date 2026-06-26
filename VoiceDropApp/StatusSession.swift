@@ -2,7 +2,7 @@ import Foundation
 import Observation
 
 /// Maintains a persistent WebSocket to wss://jianshuo.dev/agent/status and
-/// delivers real-time mining status updates to the app. mine.py pushes a
+/// delivers real-time mining status updates to the app. The Worker miner pushes a
 /// notification at each phase of a recording, so the UI can flip between
 /// 待处理 / 听录音 / 挖文章 / 已成文 / 无语音 without polling.
 @MainActor

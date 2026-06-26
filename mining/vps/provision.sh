@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One-time setup of the WeChat publish relay on the Tokyo VPS. Run as root ON the VPS,
 # AFTER the code is in /opt/wechat-relay (use mining/deploy_relay.sh from the dev box,
-# or scp mine.py relay_server.py wechat-relay.service provision.sh there).
+# or scp relay_server.py wechat-relay.service provision.sh there).
 #
 #   WECHAT_RELAY_SECRET=<same-as-Cloudflare-Pages> bash /opt/wechat-relay/provision.sh
 #
@@ -9,7 +9,7 @@
 # Cloudflare Tunnel set up in the printed next-steps.
 set -euo pipefail
 DEST=/opt/wechat-relay
-[ -f "$DEST/relay_server.py" ] || { echo "ERROR: copy mine.py + relay_server.py to $DEST first"; exit 1; }
+[ -f "$DEST/relay_server.py" ] || { echo "ERROR: copy relay_server.py to $DEST first"; exit 1; }
 
 # 1. Shared secret (relay.env). Reuse if present; else take $WECHAT_RELAY_SECRET or generate.
 if [ ! -f "$DEST/relay.env" ]; then

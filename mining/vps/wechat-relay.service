@@ -9,11 +9,9 @@ WorkingDirectory=/opt/wechat-relay
 # WECHAT_RELAY_SECRET lives here (chmod 600, not in git). Must match the
 # Cloudflare Pages secret of the same name.
 EnvironmentFile=/opt/wechat-relay/relay.env
-# mine.py hard-reads FILES_TOKEN at import; the relay never uses it.
-Environment=FILES_TOKEN=unused-by-relay
 Environment=PORT=8848
-# python3.12 required: mine.py uses backslashes inside f-strings (3.12+ syntax;
-# CI pins 3.12). On a stock Ubuntu 22.04 box install via deadsnakes.
+# relay_server.py is stdlib-only and self-contained (no FILES_TOKEN, no R2). It runs
+# on any Python 3.10+; the box already has 3.12 from the earlier deadsnakes install.
 ExecStart=/usr/bin/python3.12 /opt/wechat-relay/relay_server.py
 Restart=always
 RestartSec=2

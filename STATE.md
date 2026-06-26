@@ -13,7 +13,7 @@ public web preview of any article.
 
 | Repo | Path | What | Deploy |
 |---|---|---|---|
-| voicedrop | `~/code/voicedrop` | iOS app (SwiftUI) + server miner (`mining/mine.py`) + CI | push `main` → GitHub Actions `Build & Deploy` → **TestFlight** (fastlane). App Store submit = manual `appstore` workflow_dispatch → `fastlane release skip_build:true`. |
+| voicedrop | `~/code/voicedrop` | iOS app (SwiftUI) + WeChat publish relay (`mining/relay_server.py`) + CI | push `main` → GitHub Actions `Build & Deploy` → **TestFlight** (fastlane). App Store submit = manual `appstore` workflow_dispatch → `fastlane release skip_build:true`. |
 | jianshuo.dev | `~/code/jianshuo.dev` | Cloudflare **Pages** project `jianshuo-dev`: files API + public article page, backed by R2 bucket `jianshuo-dev-files` (binding `FILES`) | **manual** `npx wrangler pages deploy . --project-name jianshuo-dev` (not git-triggered) |
 | voicedrop-agent | `~/code/jianshuo.dev/agent` | Cloudflare **Worker** (Durable Objects; Pages can't host them) on route `jianshuo.dev/agent/*`: live article editing + real-time status. Same R2 `FILES` + `SESSION_SECRET` as Pages. | **manual** `cd ~/code/jianshuo.dev/agent && npx wrangler deploy` |
 | claude-skills | `~/code/claude-skills/wjs-mining-voicedrop` | the Mac-side mining skill (WeChat drafts) | commit on `main`; publish hook syncs `wjs-*` to public repo |
@@ -57,7 +57,7 @@ Keychain) OR a Sign-in-with-Apple session JWT. Server admin token = `FILES_TOKEN
 - `shares/<id>` — value is a full article key; backs the short public share link. `id = HMAC(key)[:10]`.
 - `community/<shareId>.json` — a public **schema-2 live pointer** to a shared article: `{schema:2,shareId,owner,articleKey,author,firstSharedAt,replyTo?}` (no content copy — title/body read live from `articleKey`). `shareId = HMAC('community:'+articleKey)[:12]`. Global (cross-user). Editing the source article IS reflected immediately; deleting the source recording **reaps** this pointer (see Community self-heal below). Legacy schema-1 posts with inline `{title,articles}` may still exist and are read as-is.
 - **"processed" = `.json` OR `.empty` exists.** Audio is NEVER auto-deleted; only the user deletes it in-app.
-- `llmlogs/<YYYY-MM-DD>/<epochms>-<rand6>.json` — **every** Anthropic call (mine.py + agent worker) recorded raw `{id,ts,source:mine|agent,user_scope,model,latency_ms,http_status,ok,turn_id,step,request,response|error,meta}`. Admin-only (outside `users/`). 30-day R2 lifecycle (`llmlogs-30d`). Viewer: `voicedrop/admin/llm.html` (reads via admin `GET /files/api/llmlog/{dates,list?date=}` + `download/<key>`). Best-effort write — never blocks mining/editing.
+- `llmlogs/<YYYY-MM-DD>/<epochms>-<rand6>.json` — **every** Anthropic call (Worker miner + agent worker) recorded raw `{id,ts,source:mine|agent,user_scope,model,latency_ms,http_status,ok,turn_id,step,request,response|error,meta}`. Admin-only (outside `users/`). 30-day R2 lifecycle (`llmlogs-30d`). Viewer: `voicedrop/admin/llm.html` (reads via admin `GET /files/api/llmlog/{dates,list?date=}` + `download/<key>`). Best-effort write — never blocks mining/editing.
 - `minelogs/<YYYY-MM-DD>/<epochms>-<stem>.json` — **每次 Miner DO 处理**一条录音的事件日志 `{ts,stem,audioKey,result:"mined|empty|error",elapsed_ms,events:[{ts,msg,data}]}`. Admin-only. Viewer: `voicedrop/admin/mine.html`. Best-effort —`result:"skip"`（已处理跳过）时不写。
 
 
@@ -102,23 +102,44 @@ Idempotent: an existing draft is updated in place (no dupe).
 runs ON that VPS and calls `api.weixin.qq.com` directly.
 
 - **Relay** = `wechat-relay` systemd unit on the VPS: `python3.12 /opt/wechat-relay/relay_server.py`
-  bound to `127.0.0.1:8848`, reusing `mining/mine.py` (**needs Python 3.12** — backslash-in-fstring).
-  **Dumb**: no R2 / `FILES_TOKEN`; gets appid/secret + article per request, returns results; the
-  Function persists. Code = `mining/relay_server.py` + `mining/mine.py`. Deploy = `mining/deploy_relay.sh`
-  (`VPS_SSH=root@66.42.45.128 ./mining/deploy_relay.sh` → rsync + restart). First-time provision =
-  `mining/vps/provision.sh` (+ `wechat-relay.service`, `README.md`).
+  bound to `127.0.0.1:8848`. **Self-contained, stdlib-only** — `relay_server.py` holds the entire
+  WeChat + cover toolchain (`wechat_access_token` / `md_to_wechat_html` / the `assets/wechat-covers`
+  picker / `create|update|sync_wechat_drafts`); no R2 / `FILES_TOKEN`, no ASR, no Claude. **Dumb**:
+  gets appid/secret + article per request, returns results; the Function persists. Code =
+  `mining/relay_server.py` (single file). Deploy = `mining/deploy_relay.sh`
+  (`VPS_SSH=root@66.42.45.128 ./mining/deploy_relay.sh` → rsync + drop stale `mine.py` + daemon-reload +
+  restart + health). First-time provision = `mining/vps/provision.sh` (+ `wechat-relay.service`, `README.md`).
 - **Exposed via a Cloudflare Tunnel** (zero open inbound port): `cloudflared` systemd unit, tunnel
   `wechat-pub` → proxied CNAME `wechat-pub.jianshuo.dev` → `127.0.0.1:8848`. Inbound auth = header
   `X-Relay-Secret` (= Pages `WECHAT_RELAY_SECRET` = VPS `/opt/wechat-relay/relay.env`). WeChat egress
   still exits `66.42.45.128`, so the whitelist is unaffected. **No fallback** by design — failures surface.
-- The old `publish-wechat.yml` GitHub Action is **orphaned for the app path** (the Function no longer
-  dispatches it); still used by the `mine.yml` auto-push path.
+- `mining/mine.py`, `mining/publish_wechat.py`, and `.github/workflows/publish-wechat.yml` were all
+  **deleted (2026-06-26)**. `mine.py`'s mining half was long superseded by the Worker miner
+  (`agent/src/miner.js`, "port of mine.py to JS"); its WeChat half was the relay's only live use, now
+  inlined into `relay_server.py`. The publish-wechat workflow path was superseded by this synchronous
+  relay. See `mining/REMOVED.md` for the tombstone + git-restore commands. **Nothing runs `python mine.py`
+  anymore** — there is no `mine.yml`, and `POST /files/api/mine` dispatches the Worker DO, not a workflow.
 
-**Per-article covers:** `mine.resolve_cover_thumb(token, doc_id, wechat_cfg)` picks one of
-`assets/wechat-covers/style01–10.png` by `hash(doc.id)`, uploads it to WeChat once, and caches the
-material id per cover name in `WECHAT.json.coverMediaIds` (reused across docs sharing a cover). Used by
-**both** the relay (on-demand) and the CI miner auto-push (mine.py:~660). Gray placeholder = fallback
-when the cover set is empty/unreachable.
+**Per-article covers:** `resolve_cover_thumb(token, doc_id, wechat_cfg)` (in `relay_server.py`) picks one
+of `assets/wechat-covers/style01–10.png` by `hash(doc.id)`, uploads it to WeChat once, and caches the
+material id per cover name in `WECHAT.json.coverMediaIds` (reused across docs sharing a cover); the
+Function passes the cache in and persists what the relay returns. Gray placeholder = fallback when the
+cover set is empty/unreachable.
+
+**Inline body photos in WeChat drafts (2026-06-26):** the body's `[[photo:<relkey>]]` markers used to be
+**stripped** from WeChat drafts (the markers never carried the actual image). Now the relay embeds them:
+the Function passes `owner` (= `users/<sub>/`) in the publish payload; `relay_server.py` `make_photo_resolver`
+fetches each photo from the public `GET /files/api/photo/<owner+relkey>` endpoint (no auth) and uploads it
+via WeChat `media/uploadimg` (content-image API — no material-quota cost), then `md_to_wechat_html` replaces
+the marker line with a centered `<img>`. **A photo failure never breaks the publish** — that one marker is
+stripped and publishing continues. Legacy numeric `[[photo:N]]` and mid-paragraph markers don't resolve and
+are stripped (as before). Requires the relay + the Pages Function both deployed (done 2026-06-26).
+  - **Uploaded-URL cache (disposable, NOT in the article JSON):** a global map `appid+fullkey → {url,ts}` in
+    a local scratch file on the relay box (`/opt/wechat-relay/imgcache.json`, `WECHAT_IMG_CACHE`-overridable),
+    so re-publishing / voice-editing doesn't re-upload every photo each time. Entries >30 days old are treated
+    as misses and re-uploaded; each write prunes expired ones (never grows unbounded). Per-appid scoped (a URL
+    is only reused for the same WeChat account). Only successful uploads are cached. Losing the file = a
+    one-time re-upload. The relay stays "dumb" (no R2 / no article-JSON writes) — this is pure scratch.
 
 Infra (tunnel + DNS + VPS service) recorded in the iCloud `IT基础设施-更改记录.html` (2026-06-23).
 
@@ -144,7 +165,7 @@ app's existing tokens) + `CLAUDE_API_KEY`. Two Durable Objects (`agent/src/index
   and queued instructions stack above it (`RecordingDetailView.swift`).
 - **`Miner`** (singleton DO `idFromName("miner")`) — serialised mine runs via `alarm()`. Triggered by `POST /agent/mine/trigger` (any valid token) or the 6-hour cron (`scheduled` handler). Lists all users' unprocessed audio, runs Volcano ASR + Claude mining, writes `articles/<stem>.json` or `.empty`, writes `minelogs/`. POSTs `POST /agent/notify` with `FILES_TOKEN` after each recording to update `StatusHub`. Source: `agent/src/miner.js`.
 - **`StatusHub`** (`wss://…/agent/status`, one instance per user `status:<scope>`) — real-time mining
-  status. `mine.py` POSTs `POST /agent/notify` (auth `FILES_TOKEN`) at each mining phase; the hub
+  status. The Worker miner (`miner.js`) POSTs `POST /agent/notify` (auth `FILES_TOKEN`) at each mining phase; the hub
   broadcasts `{type:"status_update",stem,status}` (status ∈ `asr|mining|ready|empty`, passed through
   verbatim — no whitelist) to that user's app sockets, so rows flip **待处理 → 听录音 → 挖文章 → 已成文**
   (or → 无语音) with no polling (`StatusSession.swift` `onPhase/onDone`, `LibraryStore.markPhase/markDone`).
@@ -259,10 +280,15 @@ gear → **设置** (redesign "方案二"; the old `ContentView` 3-tab `TabView`
   `users/<sub>/CLAUDE.md`; **微信公众号** AppID/AppSecret (format- + live-validated before save) →
   `WECHAT.json`; **账户** anon ID + copy ID / access token.
 
-## Server miner (`mining/mine.py`)
+## Server miner — now the Worker DO (`agent/src/miner.js`)
 
-- **Legacy/fallback path** — primary mining is now the Worker Miner DO (triggered on upload + cron every 6h). `mine.py` still works and can be run manually or via `POST /files/api/mine` → dispatches `mine.yml`. Idempotent: skips anything with a `.json` or `.empty` marker.
-- **R2 list truncation (fixed 2026-06-24):** R2 `list()` has a hard `limit: 1000`. With >1000 objects in the bucket (audio × 3 files + community/assets/links), the `/list` endpoint silently truncated — newest article JSONs (alphabetically last) were cut off, so mine.py saw them as unprocessed and re-mined every run. Two fixes: (1) `functions/files/api/[[path]].js` `/list` now paginates via cursor loop until `listed.truncated` is false; (2) `mine.py` calls `api_exists()` — a per-key HEAD check using `env.FILES.head(key)`, which is always strongly consistent — before processing, so a lagged or truncated list can never cause a re-mine. HEAD support also added to the `/download` route. Verified: post-fix run showed `list: 167 audio · 0 unprocessed`.
+- **The Python miner `mining/mine.py` was deleted (2026-06-26).** All mining runs in the Worker `Miner`
+  DO (`agent/src/miner.js`, a JS port of the old mine.py), triggered on upload + 6-hour cron + `POST
+  /files/api/mine` (→ dispatches the Worker DO, **not** a workflow). Idempotent: skips anything with a
+  `.json` or `.empty` marker. The only surviving Python is `mining/relay_server.py` (the WeChat publish
+  relay — see the WeChat section above) and the Volcano ASR helpers; `mine.py`/`publish_wechat.py` are in
+  the `mining/REMOVED.md` tombstone with git-restore commands.
+- **R2 list truncation (fixed 2026-06-24):** R2 `list()` has a hard `limit: 1000`. With >1000 objects in the bucket (audio × 3 files + community/assets/links), the `/list` endpoint silently truncated — newest article JSONs (alphabetically last) were cut off, so the miner saw them as unprocessed and re-mined every run. Two fixes: (1) `functions/files/api/[[path]].js` `/list` now paginates via cursor loop until `listed.truncated` is false; (2) the miner does a per-key HEAD check (`env.FILES.head(key)`, always strongly consistent) before processing, so a lagged or truncated list can never cause a re-mine. HEAD support also added to the `/download` route.
 - Per recording: presign R2 key → Volcano **async file ASR** (empty→`.empty no-speech`) → Claude API (`MINE_MODEL`, default claude-sonnet-4-6) → write `.json`. (No local download/ffprobe — the file API takes a URL.)
 - **JSON is forced**: `_articles_from` strips ``` / ```json fences + stray leading `json`, extracts the outermost `{…}`; if unparseable it **raises (retries next cycle)** — never stores raw model text as a body. (Assistant prefill is NOT used — sonnet-4-6 rejects it with 400.)
 - Reads the owner's `CLAUDE.md` and appends it after the system prompt.
