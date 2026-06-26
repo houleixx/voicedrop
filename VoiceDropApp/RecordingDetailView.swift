@@ -196,13 +196,12 @@ struct RecordingDetailView: View {
                 }
             }
 
-            let startCount = doc?.photos?.count ?? 0
-            let keysDesc = relKeys.enumerated()
-                .map { "第\(startCount + $0.offset + 1)张(key:\($0.element))" }
-                .joined(separator: "、")
+            // Each photo is referenced by its OWN key as the marker — no array index
+            // to keep in sync. The worker also passes these keys to the model.
+            let keysDesc = relKeys.map { "[[photo:\($0)]]" }.joined(separator: "、")
             let countWord = relKeys.count == 1 ? "这张照片" : "这\(relKeys.count)张照片"
             agent.enqueue(
-                "我刚拍了\(countWord)(\(keysDesc))，请把\(relKeys.count == 1 ? "它" : "每一张都")插入文章里最合适的位置，用[[photo:N]]标记，N是照片在photos数组里的序号（从1起）。所有照片必须全部插入，不能遗漏。",
+                "我刚拍了\(countWord)，请把\(relKeys.count == 1 ? "它" : "每一张都")插入文章里最合适的位置。每张照片用它自己的标记（原样写进正文，放在和场景最相符的段落附近）：\(keysDesc)。所有照片必须全部插入，不能遗漏。",
                 images: agentImages
             )
             showToast("图片已上传，AI正在插入…")
@@ -220,87 +219,135 @@ struct RecordingDetailView: View {
 
     // MARK: Nav bar
 
+    /// 顶部导航：返回 … 播放键 [工具] ⋯。整条播放条收进右上角的播放键（外圈细圆环显示进度），
+    /// 播放键常驻在 ⋯ 左边；进入编辑态时在播放键与 ⋯ 之间插入「插入照片 + 撤销/重做」，⋯ 始终保留。
     private var navBar: some View {
         HStack {
             NavSquare(systemName: "chevron.left", stroke: Theme.inkRead, border: Theme.borderRead) { dismiss() }
                 .accessibilityLabel("返回")
             Spacer()
             if !articles.isEmpty {
-                if isEditing {
-                    // 编辑工具替换 ⋯ 菜单：插入照片 + 撤销/重做
-                    HStack(spacing: 8) {
-                        Button { showingInsertPhoto = true } label: {
-                            RoundedRectangle(cornerRadius: Theme.R.nav)
-                                .fill(Theme.card)
-                                .frame(width: 38, height: 38)
-                                .overlay(
-                                    Image(systemName: "photo")
-                                        .font(.system(size: 16, weight: .regular))
-                                        .foregroundStyle(Color(hex: "5A5249"))
-                                )
-                                .overlay(RoundedRectangle(cornerRadius: Theme.R.nav).stroke(Theme.borderRead, lineWidth: 1))
-                                .navButtonShadow()
-                        }
-                        .buttonStyle(.plain)
-
+                HStack(spacing: 10) {
+                    navPlayButton
+                    if isEditing {
+                        insertPhotoButton
+                            .transition(.opacity.combined(with: .scale(scale: 0.95)))
                         if versions.count > 1 {
-                            HStack(spacing: 0) {
-                                Button { performUndo() } label: {
-                                    Image(systemName: "arrow.uturn.backward")
-                                        .font(.system(size: 15, weight: .medium))
-                                        .foregroundStyle(canUndo ? Color(hex: "3A352E") : Color(hex: "C9BFB0"))
-                                        .frame(width: 38, height: 38)
-                                }
-                                .buttonStyle(.plain).disabled(!canUndo)
-                                Rectangle().fill(Theme.borderRead).frame(width: 1, height: 20)
-                                Button { performRedo() } label: {
-                                    Image(systemName: "arrow.uturn.forward")
-                                        .font(.system(size: 15, weight: .medium))
-                                        .foregroundStyle(canRedo ? Color(hex: "3A352E") : Color(hex: "C9BFB0"))
-                                        .frame(width: 38, height: 38)
-                                }
-                                .buttonStyle(.plain).disabled(!canRedo)
-                            }
-                            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.R.nav))
-                            .overlay(RoundedRectangle(cornerRadius: Theme.R.nav).stroke(Theme.borderRead, lineWidth: 1))
-                            .navButtonShadow()
+                            undoRedoGroup
+                                .transition(.opacity.combined(with: .scale(scale: 0.95)))
                         }
                     }
-                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
-                } else {
-                    Menu {
-                        Button { Task { await publishWechatTapped() } } label: {
-                            Label(published ? "更新公众号草稿" : "发布公众号草稿", systemImage: "paperplane")
-                        }
-                        Toggle(isOn: Binding(
-                            get: { sharedToCommunity },
-                            set: { newValue in Task { await toggleCommunity(newValue) } }
-                        )) {
-                            Label("VD社区可见", systemImage: "person.2")
-                        }
-                        Button { Task { await share() } } label: {
-                            Label("分享", systemImage: "square.and.arrow.up")
-                        }
-                        Divider()
-                        Button(role: .destructive) { confirmDeleteFromDetail = true } label: {
-                            Label("删除", systemImage: "trash")
-                        }
-                    } label: {
-                        RoundedRectangle(cornerRadius: Theme.R.nav)
-                            .fill(Theme.ink)
-                            .frame(width: 38, height: 38)
-                            .overlay {
-                                if publishing { ProgressView().tint(.white) }
-                                else { Image(systemName: "ellipsis").font(.system(size: 16, weight: .semibold)).foregroundStyle(.white) }
-                            }
-                            .navButtonShadow()
-                    }
-                    .accessibilityLabel("更多")
+                    moreMenu   // ⋯ 常驻：平时态在播放键右边；编辑态退到工具组右边，始终保留
                 }
             }
         }
         .padding(.horizontal, 18).padding(.top, 8).padding(.bottom, 8)
         .animation(.easeInOut(duration: 0.2), value: isEditing)
+    }
+
+    /// 播放键 + 外圈进度细圆环（取代整条播放条）。点一下播放/暂停；首次播放先下载音频。
+    private var navPlayButton: some View {
+        Button {
+            if player.duration == 0 { Task { await loadAndPlay() } } else { player.toggle() }
+        } label: {
+            ZStack {
+                // 外圈：轨道 + 进度弧（细 2.5pt，留 2pt 内边距不被裁切，半径≈18 对齐设计稿）
+                Circle().stroke(Color(hex: "E7DECF"), lineWidth: 2.5).padding(2)
+                Circle()
+                    .trim(from: 0, to: player.progress)
+                    .stroke(Theme.accent, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                    .padding(2)
+                // 内圈：赭红实心 + 播放/暂停图标
+                Circle().fill(Theme.accent).frame(width: 30, height: 30)
+                    .overlay(
+                        Image(systemName: loadingAudio ? "arrow.down" : (player.isPlaying ? "pause.fill" : "play.fill"))
+                            .font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
+                            .symbolEffect(.pulse, isActive: loadingAudio)
+                    )
+                    .shadow(color: Theme.accent.opacity(0.32), radius: 4, x: 0, y: 2)
+            }
+            .frame(width: 40, height: 40)
+            .contentShape(Circle())
+        }
+        .buttonStyle(.plain).disabled(loadingAudio)
+        .accessibilityLabel(player.isPlaying ? "暂停" : "播放")
+        .animation(.linear(duration: 0.2), value: player.progress)   // 跟播放计时器 0.2s 节拍平滑推进
+    }
+
+    /// 编辑态：插入照片（拍照/相册）。
+    private var insertPhotoButton: some View {
+        Button { showingInsertPhoto = true } label: {
+            RoundedRectangle(cornerRadius: Theme.R.nav)
+                .fill(Theme.card)
+                .frame(width: 38, height: 38)
+                .overlay(
+                    Image(systemName: "photo")
+                        .font(.system(size: 16, weight: .regular))
+                        .foregroundStyle(Color(hex: "5A5249"))
+                )
+                .overlay(RoundedRectangle(cornerRadius: Theme.R.nav).stroke(Theme.borderRead, lineWidth: 1))
+                .navButtonShadow()
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("插入照片")
+    }
+
+    /// 编辑态：撤销 / 重做（一个白底圆角分段控件，中间一条分隔线）。
+    private var undoRedoGroup: some View {
+        HStack(spacing: 0) {
+            Button { performUndo() } label: {
+                Image(systemName: "arrow.uturn.backward")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(canUndo ? Color(hex: "3A352E") : Color(hex: "C9BFB0"))
+                    .frame(width: 38, height: 38)
+            }
+            .buttonStyle(.plain).disabled(!canUndo).accessibilityLabel("撤销")
+            Rectangle().fill(Theme.borderRead).frame(width: 1, height: 20)
+            Button { performRedo() } label: {
+                Image(systemName: "arrow.uturn.forward")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(canRedo ? Color(hex: "3A352E") : Color(hex: "C9BFB0"))
+                    .frame(width: 38, height: 38)
+            }
+            .buttonStyle(.plain).disabled(!canRedo).accessibilityLabel("重做")
+        }
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.R.nav))
+        .overlay(RoundedRectangle(cornerRadius: Theme.R.nav).stroke(Theme.borderRead, lineWidth: 1))
+        .navButtonShadow()
+    }
+
+    /// ⋯ 菜单（发布/分享/删除），平时态与编辑态都常驻。白底灰点，与播放键的赭红圆环主次分明。
+    private var moreMenu: some View {
+        Menu {
+            Button { Task { await publishWechatTapped() } } label: {
+                Label(published ? "更新公众号草稿" : "发布公众号草稿", systemImage: "paperplane")
+            }
+            Toggle(isOn: Binding(
+                get: { sharedToCommunity },
+                set: { newValue in Task { await toggleCommunity(newValue) } }
+            )) {
+                Label("VD社区可见", systemImage: "person.2")
+            }
+            Button { Task { await share() } } label: {
+                Label("分享", systemImage: "square.and.arrow.up")
+            }
+            Divider()
+            Button(role: .destructive) { confirmDeleteFromDetail = true } label: {
+                Label("删除", systemImage: "trash")
+            }
+        } label: {
+            RoundedRectangle(cornerRadius: Theme.R.nav)
+                .fill(Theme.card)
+                .frame(width: 38, height: 38)
+                .overlay {
+                    if publishing { ProgressView().tint(Theme.accent).scaleEffect(0.8) }
+                    else { Image(systemName: "ellipsis").font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.secondary) }
+                }
+                .overlay(RoundedRectangle(cornerRadius: Theme.R.nav).stroke(Theme.borderRead, lineWidth: 1))
+                .navButtonShadow()
+        }
+        .accessibilityLabel("更多")
     }
 
     private func share() async {
@@ -347,31 +394,27 @@ struct RecordingDetailView: View {
     // MARK: Article pane
 
     private var articlePane: some View {
-        VStack(spacing: 0) {
-            playerCard
-                .padding(.horizontal, 18).padding(.top, 6).padding(.bottom, 14)
+        // 整条播放条已收进顶部播放键，正文直接上移、阅读区更大。
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                if let a = articles[safe: articleIndex] {
+                    Text(a.title)
+                        .font(.system(size: 23, weight: .semibold)).foregroundStyle(Theme.inkRead)
+                        .lineSpacing(5).fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 14)
+                    Text(recording.displayTitle)
+                        .font(.system(size: 13)).foregroundStyle(Theme.metaRead)
+                        .padding(.top, 8)
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    if let a = articles[safe: articleIndex] {
-                        Text(a.title)
-                            .font(.system(size: 23, weight: .semibold)).foregroundStyle(Theme.inkRead)
-                            .lineSpacing(5).fixedSize(horizontal: false, vertical: true)
-                            .padding(.top, 20)
-                        Text(recording.displayTitle)
-                            .font(.system(size: 13)).foregroundStyle(Theme.metaRead)
-                            .padding(.top, 8)
+                    if articles.count > 1 { chipRow.padding(.top, 16) }
 
-                        if articles.count > 1 { chipRow.padding(.top, 16) }
-
-                        articleBody(a).padding(.top, articles.count > 1 ? 16 : 20)
-                    }
+                    articleBody(a).padding(.top, articles.count > 1 ? 16 : 20)
                 }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 8)
             }
-            .contentMargins(.bottom, 96, for: .scrollContent)   // clear the floating pill
+            .padding(.horizontal, 20)
+            .padding(.bottom, 8)
         }
+        .contentMargins(.bottom, 96, for: .scrollContent)   // clear the floating pill
     }
 
     /// One rendered row of the body: a numbered text paragraph, or a numbered image.
@@ -403,8 +446,8 @@ struct RecordingDetailView: View {
                     lineNo += 1
                     rows.append(.paragraph(lineNo, para))
                 }
-            case .photo(let n):
-                if let key = photos[safe: n - 1] { imgNo += 1; rows.append(.image(imgNo, key)) }
+            case .photo(let token):
+                if let key = ArticleBody.resolvePhotoKey(token, photos: photos) { imgNo += 1; rows.append(.image(imgNo, key)) }
             }
         }
         return rows
@@ -832,7 +875,14 @@ struct PhotoTile: View {
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: 12))
-            .task {
+            // Bind the download to `relKey`, NOT to the view's identity. In the body
+            // ForEach a row's identity is positional ("i\(n)"), so when a newly inserted
+            // photo shifts the numbering, an existing PhotoTile is reused with a *new*
+            // relKey while its identity stays the same. A plain `.task` would not re-run,
+            // leaving the stale (old) image on screen — two different markers showing the
+            // same photo. `.task(id: relKey)` re-runs whenever the key changes.
+            .task(id: relKey) {
+                image = nil
                 guard let data = try? await store.downloadData(relKey) else { return }
                 image = UIImage(data: data)
             }

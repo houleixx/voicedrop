@@ -46,24 +46,36 @@ struct ArticleDoc: Decodable {
     var hasWechatDraft: Bool { (articles ?? []).contains { $0.wechatMediaId != nil } }
 }
 
-/// A piece of an article body: a run of markdown text, or an inline photo
-/// (1-based index into the doc's `photos` array), parsed from `[[photo:N]]`
-/// markers the miner inserts at the spot the scene is described.
+/// A piece of an article body: a run of markdown text, or an inline photo,
+/// parsed from `[[photo:<token>]]` markers inserted at the spot the scene is
+/// described. The token is either a relative R2 key (new format, e.g.
+/// `photos/…/….jpg`) or a 1-based index into the doc's `photos` array (legacy).
 enum ArticleSegment: Identifiable {
     case text(String)
-    case photo(Int)
+    case photo(String)   // raw marker token — resolve via ArticleBody.resolvePhotoKey
     var id: String {
         switch self {
         case .text(let s): return "t:\(s.count):\(s.prefix(12))"
-        case .photo(let n): return "p:\(n)"
+        case .photo(let tok): return "p:\(tok)"
         }
     }
 }
 
 enum ArticleBody {
-    private static let marker = try! NSRegularExpression(pattern: #"\[\[photo:(\d+)\]\]"#)
+    // Token = anything but `]` — matches both a relative key and a legacy digit index.
+    private static let marker = try! NSRegularExpression(pattern: #"\[\[photo:([^\]]+)\]\]"#)
 
-    /// Split a body into text + photo segments at `[[photo:N]]` markers.
+    /// Resolve a photo marker token to a relative R2 key. New format: the token
+    /// IS the key. Legacy format: a 1-based index into the doc's `photos` array.
+    static func resolvePhotoKey(_ token: String, photos: [String]) -> String? {
+        if let n = Int(token) {                                // legacy numeric index
+            let idx = n - 1
+            return (idx >= 0 && idx < photos.count) ? photos[idx] : nil
+        }
+        return token                                           // new format: token is the key
+    }
+
+    /// Split a body into text + photo segments at `[[photo:<token>]]` markers.
     static func segments(_ body: String) -> [ArticleSegment] {
         let ns = body as NSString
         let matches = marker.matches(in: body, range: NSRange(location: 0, length: ns.length))
@@ -76,7 +88,7 @@ enum ArticleBody {
                 let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !trimmed.isEmpty { out.append(.text(trimmed)) }
             }
-            if let n = Int(ns.substring(with: m.range(at: 1))) { out.append(.photo(n)) }
+            out.append(.photo(ns.substring(with: m.range(at: 1))))
             cursor = m.range.location + m.range.length
         }
         if cursor < ns.length {

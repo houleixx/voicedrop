@@ -48,9 +48,20 @@ final class ExportManager {
             if rec.hasArticles {
                 doc = await store.fetchDoc(rec)
                 if let d = doc {
-                    // Download photos first so the HTML can reference them
+                    // Download photos the bodies reference (the body is the source
+                    // of truth; resolve [[photo:<token>]] → key via ArticleBody).
                     var downloadedPhotoPaths: [String] = []
-                    for key in d.photos ?? [] {
+                    var photoKeys: [String] = []
+                    for a in d.resolvedArticles {
+                        for seg in ArticleBody.segments(a.body) {
+                            if case .photo(let token) = seg,
+                               let key = ArticleBody.resolvePhotoKey(token, photos: d.photos ?? []),
+                               !photoKeys.contains(key) {
+                                photoKeys.append(key)
+                            }
+                        }
+                    }
+                    for key in photoKeys {
                         if let data = try? await store.downloadData(key) {
                             // key = "photos/<sessionTs>/<captureTs>.jpg" — preserve sub-path
                             let dest = srcDir.appendingPathComponent(key)
@@ -263,14 +274,12 @@ private func recordingHTMLData(rec: Recording, doc: ArticleDoc, downloadedPhotos
                 for p in paras {
                     bodyHTML += "<p>\(h(p.replacingOccurrences(of: "\n", with: " ")))</p>\n"
                 }
-            case .photo(let n):
-                let photos = doc.photos ?? []
-                if n >= 1, n <= photos.count {
-                    let key = photos[n - 1]   // e.g. "photos/<sessionTs>/<captureTs>.jpg"
-                    if downloaded.contains(key) {
-                        // article is in recordings/, photos are at root level
-                        bodyHTML += "<img class=\"photo\" src=\"../\(key)\" loading=\"lazy\">\n"
-                    }
+            case .photo(let token):
+                // token = relative key (new) or legacy 1-based index → resolve to a key.
+                if let key = ArticleBody.resolvePhotoKey(token, photos: doc.photos ?? []),
+                   downloaded.contains(key) {
+                    // article is in recordings/, photos are at root level
+                    bodyHTML += "<img class=\"photo\" src=\"../\(key)\" loading=\"lazy\">\n"
                 }
             }
         }
