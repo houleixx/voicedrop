@@ -595,6 +595,12 @@ private final class PhotoDelegate: NSObject, AVCapturePhotoCaptureDelegate, @unc
               let full = SquareImage.jpeg(image),
               let thumb = SquareImage.jpeg(image, maxSide: 264, maxBytes: 80_000)
         else { return }
+        // Also save a copy to the user's Photos library — the square WYSIWYG version
+        // matching the viewfinder. Camera shots only; PHPicker imports already live there.
+        // Needs NSPhotoLibraryAddUsageDescription; a denied permission just no-ops.
+        if let square = UIImage(data: full) {
+            UIImageWriteToSavedPhotosAlbum(square, nil, nil, nil)
+        }
         onResult(ShotPayload(date: Date(), full: full, thumb: thumb))
     }
 }
