@@ -55,7 +55,7 @@ Keychain) OR a Sign-in-with-Apple session JWT. Server admin token = `FILES_TOKEN
 - `users/<sub>/WECHAT.json` — `{appid, secret, enabled, thumb_media_id?, coverMediaIds:{<coverName>:<wechatMediaId>}}` (Settings tab). Drives WeChat draft publishing; `coverMediaIds` caches the per-cover WeChat material ids.
 - `assets/wechat-covers/<style>.png` — **shared** cover image set (10: `style01`–`style10`), global (not per-user). One is picked per article by hash. Public via `/files/api/asset/wechat-covers`.
 - `shares/<id>` — value is a full article key; backs the short public share link. `id = HMAC(key)[:10]`.
-- `community/<shareId>.json` — a public **snapshot** of a shared article set `{shareId,owner,author,title,articles,firstSharedAt,updatedAt}`. `shareId = HMAC('community:'+articleKey)[:12]`. Global (cross-user). Editing the source article does NOT change the snapshot; re-sharing overwrites it.
+- `community/<shareId>.json` — a public **schema-2 live pointer** to a shared article: `{schema:2,shareId,owner,articleKey,author,firstSharedAt,replyTo?}` (no content copy — title/body read live from `articleKey`). `shareId = HMAC('community:'+articleKey)[:12]`. Global (cross-user). Editing the source article IS reflected immediately; deleting the source recording **reaps** this pointer (see Community self-heal below). Legacy schema-1 posts with inline `{title,articles}` may still exist and are read as-is.
 - **"processed" = `.json` OR `.empty` exists.** Audio is NEVER auto-deleted; only the user deletes it in-app.
 - `llmlogs/<YYYY-MM-DD>/<epochms>-<rand6>.json` — **every** Anthropic call (mine.py + agent worker) recorded raw `{id,ts,source:mine|agent,user_scope,model,latency_ms,http_status,ok,turn_id,step,request,response|error,meta}`. Admin-only (outside `users/`). 30-day R2 lifecycle (`llmlogs-30d`). Viewer: `voicedrop/admin/llm.html` (reads via admin `GET /files/api/llmlog/{dates,list?date=}` + `download/<key>`). Best-effort write — never blocks mining/editing.
 - `minelogs/<YYYY-MM-DD>/<epochms>-<stem>.json` — **每次 Miner DO 处理**一条录音的事件日志 `{ts,stem,audioKey,result:"mined|empty|error",elapsed_ms,events:[{ts,msg,data}]}`. Admin-only. Viewer: `voicedrop/admin/mine.html`. Best-effort —`result:"skip"`（已处理跳过）时不写。
@@ -158,12 +158,21 @@ Deploy: `cd ~/code/jianshuo.dev/agent && npx wrangler deploy`.
 The home has two tabs — **我的录音** + **VD社区** (`LibraryView.swift`). A user shares one of their
 articles to a public community from the detail-view ⋯ menu (分享到 VD社区). Files API routes
 (`functions/files/api/[[path]].js`):
-- `POST community/share/<articleKey>` — write a **snapshot** to `community/<shareId>.json`, preserving
-  the original `firstSharedAt` (re-sharing updates in place; later edits to the source don't leak in).
+- `POST community/share/<articleKey>` — writes a **schema-2 pointer** `{schema:2,shareId,owner,articleKey,
+  author,firstSharedAt,replyTo?}` (NO content copy), preserving the original `firstSharedAt` on re-share.
+  **Title/body are read LIVE from `articleKey` every request** — source edits show immediately (despite the
+  word "snapshot" used elsewhere, this is a live pointer, not a frozen copy).
 - `GET community/list` — all posts, **newest-first by first-share time**; each carries `mine` (owned).
 - `GET community/get/<shareId>` · `GET community/shared/<articleKey>` (is-it-shared → drives the
   分享/更新 menu label).
-- `POST community/unshare/<shareId>` — **owner-only** (403 otherwise); deletes the snapshot.
+- `POST community/unshare/<shareId>` — **owner-only** (403 otherwise); deletes the pointer.
+- **Orphan self-heal (2026-06-26):** because posts are live pointers, deleting the underlying recording
+  used to leave an empty, titleless row that opened to「这篇分享已不可用」. Now `list`/`get`/`replies` resolve
+  each pointer through `liveDocForPointer(pointerKey, p)`: live article present → show it; article gone **and
+  audio gone too** (whole recording deleted) → **reap** the orphan pointer + drop it; article gone but **audio
+  still present** (article mid-`重新生成` delete-then-remine) → keep the pointer, just hide the post until the
+  re-mine lands (so regenerating a shared post never silently un-shares it). No app update needed — pure
+  Pages-function fix; existing orphans vanish the next time anyone loads VD社区.
 
 App side: `Community.swift` (`CommunityStore`, read-only `CommunityPostView`). Owners get swipe-to-remove
 on their own posts.
@@ -185,11 +194,12 @@ gear → **设置** (redesign "方案二"; the old `ContentView` 3-tab `TabView`
 - **VD社区** — see the Community section above.
 - **录音 (takeover)** `RecordSession.swift` — full-screen, opens **idle** (tap-to-record). Records to a
   **staging name** `recording-<ts>.m4a`, promoted to the enriched `VoiceDrop-*` name only after finalize
-  → fixes the moov-less/0-byte corrupt-upload race; uploads on finish. **Faint 拍照 trigger:** a **very subtle
-  `camera` SF Symbol** (`Theme.faint` @ 0.5 opacity, no circle/label) **directly to the right of the 停止 circle,
-  on the same vertical line** — implemented as an `.overlay(alignment:.center)` on the 停止 button with
-  `.offset(x:64)`, so it never affects layout and the 停止 key stays centered. Discoverable but unobtrusive.
-  Tapping opens a full-screen camera (`PhotoCapture.swift`,
+  → fixes the moov-less/0-byte corrupt-upload race; uploads on finish. **Faint 拍照 trigger** (spec =
+  `handoff_recording_camera/README.md`): a **very subtle thin `camera` icon** (`#A89E8E` @ 0.45 opacity, no
+  container) in the blank area right of the 停止 key, at that area's **horizontal midpoint (≈75% of screen
+  width)**, with a 「拍照」label (11pt `#C2B8A8`) below it. Implemented as an `.overlay(alignment:.center)` on the
+  停止 button (icon center = 停止 circle center) with `.offset(x:98)`, so it never affects layout and the 停止 key
+  stays整屏居中. Tapping opens a full-screen camera (`PhotoCapture.swift`,
   `AVCaptureSession` video-only so recording is NOT interrupted). Camera design = "Photo Capture.dc.html". **Square
   viewfinder** (rule-of-thirds grid + border + empty-state hint), top bar = live "● 录音中 · MM:SS" (or
   "已拍 N 张" pill once shots exist) + a **完成** button (gray→orange) that closes and uploads. Bottom bar =

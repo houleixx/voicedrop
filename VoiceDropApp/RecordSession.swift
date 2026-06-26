@@ -90,19 +90,30 @@ struct RecordSession: View {
                         .shadow(color: .black.opacity(0.06), radius: 7, x: 0, y: 4)
                 }
                 .buttonStyle(.plain).accessibilityLabel("停止")
-                // Faint 拍照 trigger: a very subtle camera icon directly to the right of
-                // the 停止 circle, on the same vertical line. Overlaid on the 停止 button
-                // (offset right) so the 停止 key stays centered and never shifts. Camera
-                // uses AVCaptureSession (video-only) so recording is not interrupted.
+                // Faint 拍照 trigger (handoff_recording_camera/README): a very subtle
+                // camera icon in the blank area to the right of the 停止 key, at the
+                // horizontal midpoint of that area (≈75% of screen width). No container —
+                // just a thin #A89E8E icon @0.45 with a 「拍照」label below. Overlaid on the
+                // 停止 circle so its center aligns to the circle's center and the 停止 key
+                // stays整屏居中, never shifting. Camera uses AVCaptureSession (video-only)
+                // so recording is not interrupted.
                 .overlay(alignment: .center) {
                     Image(systemName: "camera")
-                        .font(.system(size: 26, weight: .light))
-                        .foregroundStyle(Theme.faint.opacity(0.5))
-                        .frame(width: 60, height: 60)
+                        .font(.system(size: 24, weight: .light))
+                        .foregroundStyle(Color(hex: "A89E8E"))
+                        .opacity(0.45)
+                        .frame(width: 42, height: 42)
                         .contentShape(Rectangle())
                         .onTapGesture { Task { await openCamera() } }
+                        .overlay(alignment: .top) {
+                            Text("拍照")
+                                .font(.system(size: 11)).tracking(2)
+                                .foregroundStyle(Color(hex: "C2B8A8"))
+                                .fixedSize()
+                                .offset(y: 42)
+                        }
                         .accessibilityLabel("拍照")
-                        .offset(x: 64)
+                        .offset(x: 98)   // 右侧空白区水平中点 ≈ 屏宽 75%（中线右移 25%）
                 }
                 Text("点击停止").font(.system(size: 12)).tracking(1).foregroundStyle(Theme.secondary)
             }
