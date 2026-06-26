@@ -37,7 +37,6 @@ struct RecordingDetailView: View {
 
     // Live voice editing — persistent push-to-talk bar.
     @State private var agentReply: AgentReply?
-    @State private var replyHeld = false
     @State private var agent = ArticleAgentSession()
     @State private var dictation = SpeechDictation()
     @State private var willCancel = false           // slid finger up past threshold
@@ -129,9 +128,9 @@ struct RecordingDetailView: View {
             Task { await loadVersionHistory() }
         }
         agent.onReply = { text, ok in
-            let reply = AgentReply(text: text, ok: ok)
-            agentReply = reply
-            if ok { scheduleReplyDismiss(reply) }
+            // The reply stays on screen until it's replaced by a newer one or the
+            // user taps elsewhere on the page — no auto-dismiss timer.
+            agentReply = AgentReply(text: text, ok: ok)
         }
         agent.connect(recording)
         await dictation.requestAuth()
@@ -418,6 +417,11 @@ struct RecordingDetailView: View {
             .padding(.bottom, 8)
         }
         .contentMargins(.bottom, 96, for: .scrollContent)   // clear the floating pill
+        // Tapping anywhere on the article body dismisses a lingering agent reply.
+        // simultaneousGesture so it never blocks scrolling or text selection.
+        .simultaneousGesture(TapGesture().onEnded {
+            if agentReply != nil { agentReply = nil }
+        })
     }
 
     /// One rendered row of the body: a numbered text paragraph, or a numbered image.
@@ -688,18 +692,9 @@ struct RecordingDetailView: View {
         .gesture(holdGesture())
     }
 
-    /// Auto-dismiss a successful reply after a beat — but not while the user is
-    /// pressing it (replyHeld), and only if it's still the same reply on screen.
-    private func scheduleReplyDismiss(_ reply: AgentReply) {
-        Task {
-            try? await Task.sleep(nanoseconds: 6_000_000_000)
-            if agentReply?.id == reply.id, !replyHeld { agentReply = nil }
-        }
-    }
-
-    /// The agent's transient one-line reply. Success: neutral light card that fades
-    /// after ~6 s — press and hold to keep it up; it re-arms the fade on release.
-    /// Error: muted-red border + warning glyph, sticky until tapped (release dismisses).
+    /// The agent's one-line reply. Success: neutral light card. Error: muted-red
+    /// border + warning glyph. It is NOT transient — it stays put until a newer
+    /// reply replaces it or the user taps elsewhere on the page (see articlePane).
     private func replyBubble(_ reply: AgentReply) -> some View {
         let warn = Color(hex: "C0392B")
         return HStack(spacing: 8) {
@@ -717,16 +712,6 @@ struct RecordingDetailView: View {
         .overlay(RoundedRectangle(cornerRadius: 13)
             .stroke(reply.ok ? Theme.borderRead : warn.opacity(0.7), lineWidth: 1))
         .transition(.move(edge: .bottom).combined(with: .opacity))
-        .contentShape(RoundedRectangle(cornerRadius: 13))
-        .gesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { _ in replyHeld = true }
-                .onEnded { _ in
-                    replyHeld = false
-                    if reply.ok { scheduleReplyDismiss(reply) }   // re-arm the fade after release
-                    else { agentReply = nil }                      // error: release/tap dismisses
-                }
-        )
     }
 
     /// Dark bubble above the bar showing the live transcript. Locator references
@@ -855,8 +840,9 @@ struct DownTriangle: Shape {
 struct SharePayload: Identifiable { let text: String; var id: String { text } }
 
 /// Full-width square photo taken during a recording session, rendered inline in
-/// the article at its `[[photo:N]]` marker. Downloads via the authenticated
-/// Files API using the stored bearer token.
+/// the article at its `[[photo:N]]` marker. Loads from the public `/photo/<full key>`
+/// endpoint (own scope via `/whoami` + relKey) — the same photo URL the community and
+/// share pages use.
 struct PhotoTile: View {
     let store: LibraryStore
     let relKey: String   // relative key, e.g. "photos/<ts>/<ts>.jpg"
@@ -886,7 +872,9 @@ struct PhotoTile: View {
             // same photo. `.task(id: relKey)` re-runs whenever the key changes.
             .task(id: relKey) {
                 image = nil
-                guard let data = try? await store.downloadData(relKey) else { return }
+                // One photo logic everywhere: resolve own scope → full key → public /photo endpoint.
+                guard let scope = await store.ownerScope(),
+                      let data = await store.photoData(fullKey: scope + relKey) else { return }
                 image = UIImage(data: data)
             }
     }

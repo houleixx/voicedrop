@@ -504,6 +504,39 @@ final class LibraryStore {
     /// Download raw data for any relative key (used by ExportManager).
     func downloadData(_ relName: String) async throws -> Data { try await get(relName) }
 
+    private var cachedScope: String?
+
+    /// The caller's data scope ("users/<sub>/"), fetched once via `/whoami` and cached.
+    /// Lets the app build a full R2 key (scope + relKey) for its own photos so they load
+    /// from the same public `/photo/<key>` endpoint the community + share pages use.
+    func ownerScope() async -> String? {
+        if let cachedScope { return cachedScope }
+        guard !token.isEmpty, let url = URL(string: "\(base.absoluteString)/whoami") else { return nil }
+        var req = URLRequest(url: url)
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        do {
+            let (data, resp) = try await URLSession.shared.data(for: req)
+            guard (resp as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) == true else { return nil }
+            struct R: Decodable { let scope: String? }
+            let s = (try? JSONDecoder().decode(R.self, from: data))?.scope
+            if let s, !s.isEmpty { cachedScope = s }
+            return cachedScope
+        } catch { return nil }
+    }
+
+    /// Download a photo by its full R2 key via the public `/photo/<key>` endpoint
+    /// (no auth — the one photo URL shared by the community + web pages).
+    func photoData(fullKey: String) async -> Data? {
+        guard !fullKey.isEmpty else { return nil }
+        let enc = fullKey.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? fullKey
+        guard let url = URL(string: "\(base.absoluteString)/photo/\(enc)") else { return nil }
+        do {
+            let (data, resp) = try await URLSession.shared.data(from: url)
+            guard (resp as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) == true else { return nil }
+            return data
+        } catch { return nil }
+    }
+
     /// Download the audio to a temp file for local playback.
     func downloadAudio(_ rec: Recording) async -> URL? {
         do {

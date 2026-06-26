@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import Observation
 
 /// One community post as listed (metadata only).
@@ -22,6 +23,8 @@ struct CommunityFullPost: Decodable {
     let articles: [MinedArticle]?
     let firstSharedAt: Double?
     let replyTo: String?
+    let owner: String?          // the photos' "users/<sub>/" prefix → build full photo keys
+    let photos: [String]?       // legacy [[photo:N]] resolution; nil for new posts
 }
 
 @MainActor
@@ -152,6 +155,20 @@ final class CommunityStore {
         } catch { return nil }
     }
 
+    /// Download a photo by its full R2 key (`users/<sub>/photos/…`) via the public
+    /// `/photo/<key>` endpoint — no auth, the same URL the web pages use. One photo
+    /// logic everywhere: read straight from the photo's original location.
+    func photoData(fullKey: String) async -> Data? {
+        guard !fullKey.isEmpty else { return nil }
+        let enc = fullKey.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? fullKey
+        guard let url = URL(string: "\(base.absoluteString)/photo/\(enc)") else { return nil }
+        do {
+            let (data, resp) = try await URLSession.shared.data(from: url)
+            guard (resp as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) == true else { return nil }
+            return data
+        } catch { return nil }
+    }
+
     /// Posts that are responses to `shareId`, oldest-first.
     func loadReplies(_ shareId: String) async -> [CommunityPost] {
         guard !token.isEmpty else { return [] }
@@ -230,14 +247,7 @@ struct CommunityPostView: View {
                             .padding(.top, 8)
                             if let orig = replyToFull { replyToChip(orig).padding(.top, 10) }
                             if articles.count > 1 { chipRow.padding(.top, 16) }
-                            let cleanBody = ArticleBody.stripMarkers(a.body)
-                            Text((try? AttributedString(markdown: cleanBody, options: .init(
-                                interpretedSyntax: .inlineOnlyPreservingWhitespace,
-                                failurePolicy: .returnPartiallyParsedIfPossible))) ?? AttributedString(cleanBody))
-                                .font(.system(size: 16)).foregroundStyle(Theme.bodyRead)
-                                .lineSpacing(9).textSelection(.enabled)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.top, articles.count > 1 ? 16 : 20)
+                            communityBody(a).padding(.top, articles.count > 1 ? 16 : 20)
                         }
                         repliesSection
                     }
@@ -299,6 +309,38 @@ struct CommunityPostView: View {
             .accessibilityLabel("更多")
         }
         .padding(.horizontal, 18).padding(.top, 8).padding(.bottom, 8)
+    }
+
+    // MARK: Article body (text + inline session photos)
+
+    /// Render the body with `[[photo:…]]` markers turned into inline image tiles —
+    /// the same scene photos the owner sees, fetched cross-user via the gated
+    /// `community/photo` endpoint. (Previously the markers were stripped, so shared
+    /// posts lost all their photos.)
+    @ViewBuilder private func communityBody(_ a: MinedArticle) -> some View {
+        VStack(alignment: .leading, spacing: 18) {
+            ForEach(ArticleBody.segments(a.body)) { seg in
+                switch seg {
+                case .text(let t):
+                    Text(textAttributed(t))
+                        .font(.system(size: 16)).foregroundStyle(Theme.bodyRead)
+                        .lineSpacing(9).textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                case .photo(let token):
+                    if let owner = full?.owner,
+                       let relKey = ArticleBody.resolvePhotoKey(token, photos: full?.photos ?? []) {
+                        CommunityPhotoTile(store: store, fullKey: owner + relKey)
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func textAttributed(_ s: String) -> AttributedString {
+        (try? AttributedString(markdown: s, options: .init(
+            interpretedSyntax: .inlineOnlyPreservingWhitespace,
+            failurePolicy: .returnPartiallyParsedIfPossible))) ?? AttributedString(s)
     }
 
     // MARK: Article chips
@@ -505,4 +547,36 @@ struct CommunityPostView: View {
 
 private extension Array {
     subscript(safe i: Int) -> Element? { indices.contains(i) ? self[i] : nil }
+}
+
+/// A square inline photo inside a community post, loaded from the public
+/// `/photo/<fullKey>` endpoint — the same photo URL used by the web pages.
+struct CommunityPhotoTile: View {
+    let store: CommunityStore
+    let fullKey: String          // "users/<sub>/photos/…/x.jpg"
+
+    @State private var image: UIImage?
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 12)
+            .fill(Theme.card)
+            .aspectRatio(1, contentMode: .fit)
+            .frame(maxWidth: .infinity)
+            .overlay {
+                if let img = image {
+                    Image(uiImage: img)
+                        .resizable().scaledToFill()
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                } else {
+                    ProgressView().tint(Theme.accent)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            // Bind to the key (not view identity) so a shifted marker re-fetches.
+            .task(id: fullKey) {
+                image = nil
+                guard let data = await store.photoData(fullKey: fullKey) else { return }
+                image = UIImage(data: data)
+            }
+    }
 }
