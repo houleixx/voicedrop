@@ -198,8 +198,8 @@ struct RecordSession: View {
     private static func uploadPhoto(date: Date, data: Data, sessionStart: Date?) async {
         guard let start = sessionStart else { return }
         let folder = RecordingName.timestamp(start)
-        let file = RecordingName.timestamp(date)
-        let key = "photos/\(folder)/\(file).jpg"
+        let offset = Int(date.timeIntervalSince(start))   // 录音开始后第几秒拍的
+        let key = RecordingName.photoKey(sessionTs: folder, offset: offset)
         let base = URL(string: "https://jianshuo.dev/files/api")!
         var req = URLRequest(url: base.appending(path: "upload").appending(path: key))
         req.httpMethod = "PUT"

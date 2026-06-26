@@ -30,7 +30,7 @@ struct ArticleDoc: Decodable {
     let srt: String?
     let articles: [MinedArticle]?
     /// Relative R2 keys for photos taken during this recording session.
-    /// e.g. ["photos/2026-06-24-131500/2026-06-24-131523.jpg"]
+    /// e.g. ["photos/2026-06-24-131500/23-k7p.jpg"]  (23 = 第23秒, k7p = 防撞随机尾)
     let photos: [String]?
     // v1 fallback fields
     let title: String?
@@ -448,9 +448,9 @@ final class LibraryStore {
     }
 
     /// Upload a square JPEG to the user's photo folder and return the relative key.
-    func uploadPhoto(data: Data, sessionTs: String, captureTs: String) async -> String? {
+    func uploadPhoto(data: Data, sessionTs: String, offset: Int) async -> String? {
         guard !token.isEmpty else { return nil }
-        let relKey = "photos/\(sessionTs)/\(captureTs).jpg"
+        let relKey = RecordingName.photoKey(sessionTs: sessionTs, offset: offset)
         let enc = relKey.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? relKey
         guard let url = URL(string: "\(base.absoluteString)/upload/\(enc)") else { return nil }
         var req = URLRequest(url: url)

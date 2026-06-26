@@ -24,6 +24,34 @@ enum RecordingName {
         return f.string(from: d)
     }
 
+    /// Parse a `yyyy-MM-dd-HHmmss` stamp (a sessionTs) back to a Date — used to
+    /// compute a photo's offset (seconds since the recording started).
+    static func date(fromTimestamp ts: String) -> Date? {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd-HHmmss"
+        return f.date(from: ts)
+    }
+
+    /// The R2 relative key for a scene photo: `photos/<sessionTs>/<offset>-<rand>.jpg`.
+    /// - `sessionTs` groups every photo of one recording (correlation + cheap cleanup).
+    /// - `offset` = seconds from the recording start to capture — this IS "第几秒加进来"
+    ///   (absolute capture time is recoverable as sessionTs + offset, so nothing is lost),
+    ///   and it's far shorter than the old absolute `yyyy-MM-dd-HHmmss` capture stamp.
+    /// - a 3-char base36 tail makes the key unique even when several photos land in the
+    ///   SAME offset-second (e.g. a 9-photo album import, whose callbacks fire near-
+    ///   simultaneously) — the old seconds-only name silently overwrote and lost photos.
+    static func photoKey(sessionTs: String, offset: Int) -> String {
+        "photos/\(sessionTs)/\(max(0, offset))-\(randomTag()).jpg"
+    }
+
+    /// `count` random base36 chars (0-9a-z). 3 → 46,656 combos: even 9 photos sharing
+    /// one offset-second collide with ~0.08% probability — comfortably safe, still tiny.
+    static func randomTag(_ count: Int = 3) -> String {
+        let alphabet = Array("0123456789abcdefghijklmnopqrstuvwxyz")
+        return String((0..<count).map { _ in alphabet.randomElement()! })
+    }
+
     static func durationTag(_ t: TimeInterval) -> String {
         let total = max(0, Int(t.rounded()))
         return "\(total / 60)m\(total % 60)s"

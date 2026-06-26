@@ -180,14 +180,17 @@ struct RecordingDetailView: View {
             let parts = recording.stem.components(separatedBy: "-")
             guard parts.count >= 5, parts[0] == "VoiceDrop" else { showToast("无法插入图片"); return }
             let sessionTs = "\(parts[1])-\(parts[2])-\(parts[3])-\(parts[4])"
-            let formatter = DateFormatter()
-            formatter.dateFormat = "yyyy-MM-dd-HHmmss"
+            // Offset = seconds from the recording start to this photo. For editor-
+            // inserted photos that's "how long after recording it was added" (can be
+            // large) — still unique & harmless; the offset semantics are only "录音内第几秒"
+            // for the during-recording capture path.
+            let sessionStart = RecordingName.date(fromTimestamp: sessionTs)
 
             var agentImages: [AgentImage] = []
             var relKeys: [String] = []
             for photo in captured {
-                let captureTs = formatter.string(from: photo.date)
-                guard let key = await store.uploadPhoto(data: photo.data, sessionTs: sessionTs, captureTs: captureTs)
+                let offset = sessionStart.map { Int(photo.date.timeIntervalSince($0)) } ?? 0
+                guard let key = await store.uploadPhoto(data: photo.data, sessionTs: sessionTs, offset: offset)
                 else { showToast("图片上传失败"); return }
                 relKeys.append(key)
                 // Generate a 320×320 thumbnail and base64-encode it for the model to see.
