@@ -96,24 +96,25 @@ struct RecordSession: View {
                 .padding(.bottom, 26)
             }
 
-            // Faint photo trigger: a very subtle camera icon in the bottom-right
-            // corner — discoverable but unobtrusive. Same tap target/position as the
-            // old invisible area, so nothing else shifts. Uses AVCaptureSession
-            // (video-only) so recording is not interrupted.
+            // Faint photo trigger: a very subtle camera icon centered in the right
+            // blank area (equal space on both sides — an empty left column mirrors
+            // the right), discoverable but unobtrusive. Overlaid, so the 停止 key
+            // never shifts. Uses AVCaptureSession (video-only) so recording is not
+            // interrupted.
             VStack {
                 Spacer()
-                HStack {
-                    Spacer()
+                HStack(spacing: 0) {
+                    Color.clear.frame(maxWidth: .infinity)   // empty left mirrors the right
                     Image(systemName: "camera")
                         .font(.system(size: 26, weight: .light))
                         .foregroundStyle(Theme.faint.opacity(0.5))
                         .frame(width: 110, height: 120)
                         .contentShape(Rectangle())
                         .onTapGesture { Task { await openCamera() } }
-                        .padding(.trailing, 16)
-                        .padding(.bottom, 10)
                         .accessibilityLabel("拍照")
+                        .frame(maxWidth: .infinity)   // center in the right half
                 }
+                .padding(.bottom, 10)
             }
         }
     }
