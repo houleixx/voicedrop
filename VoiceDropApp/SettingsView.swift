@@ -276,7 +276,7 @@ struct SettingsView: View {
     private var shortTag: String {
         let id = AuthStore.shared.anonId          // "anon-7f3a…"
         let hex = id.hasPrefix("anon-") ? String(id.dropFirst(5)) : id
-        return "VD·" + hex.prefix(4).uppercased()
+        return hex.prefix(6).uppercased()
     }
 
     var body: some View {
