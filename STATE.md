@@ -368,6 +368,47 @@ When changing any reader of an article/community doc, add the legacy shape to it
 BEFORE the change — these are characterization guards (a v1-fallback removal was verified
 to fail 4 of them). Don't delete a legacy branch without deleting its test on purpose.
 
+## 设备配对登录（device-link）— 新设备登录老账号
+
+新设备输入老账号的 **6 位短码**（设置→账户里那串 = `sha256(anon_token)` 前 6 位十六进制，大小写不敏感）→
+老设备弹出 **4 位验证码** → 在新设备输入 → 老设备把自己的 `anon_…` 密钥**端到端加密**经服务器中转给新设备 →
+新设备 adopt，登录成功。本质 = 把老设备钥匙串里的密钥安全搬到新设备（因为 anon 身份不可重新签发：
+`scope = users/anon-<sha256(token)[:32]>/`，服务器不存 token、签不出指向老账号的新 token）。
+
+canonical 设计/计划：`docs/superpowers/specs/2026-06-27-device-link-pairing-design.md` +
+`docs/superpowers/plans/2026-06-27-device-link-pairing.md`。
+
+**Worker 侧（`agent/`，jianshuo.dev）：**
+- 纯逻辑模块 **`agent/src/devicelink.js`**（vitest 全测）：`genDistinctCodes` / `buildBroadcastMessage` /
+  `resolveMatchingScopes`（用 `FILES.list` 按 `users/anon-<6hex>` 前缀去重匹配账号，零注册表）/ 配对状态机
+  `createPairing`·`verifyPairing`·`completePairing`·`isExpired`。常量 `CODE_TTL_MS=120000`、`MAX_ATTEMPTS=5`、`MAX_MATCH=10`。
+- 新增 **`LinkBroker` Durable Object**（`agent/src/index.js`，`idFromName(pairingId)` 一对一）：存配对状态 +
+  持新设备的 wait-WebSocket，`alarm()` 2 分钟自清。薄壳，逻辑全在 devicelink.js。已加 wrangler binding + migration `v4`。
+- 新增路由 **`/agent/link/{start,socket,verify,complete,cancel}`**：start 解析匹配账号→每账号一个互异 4 位码→
+  向每个匹配 scope 的 StatusHub 推 `link_request{pairingId,code,pubkey}`；verify 命中→推 `link_release`，**不向新设备泄露 scope**；
+  complete 鉴权 **callerScope===releasingScope**（只有真主人能放行）→把密文 blob 经 socket 投给新设备。
+- **`StatusHub` 广播泛化**（唯一改的现有代码）：`/broadcast` 现转发任意 `payload`，`status_update` 向后兼容（`/agent/notify` 不受影响）。
+
+**端到端加密**：X25519 → HKDF-SHA256（salt `voicedrop-device-link/v1`、info `anon-token`、32B）→ AES-GCM。
+`blob = {epk, sealed}`（sealed = `AES.GCM.combined`）。**服务器只过 pubkey 和 blob，从不解密、不持久**（除 complete→ready 瞬时中转）。
+
+**iOS 侧（`VoiceDropApp/`）：**
+- **`DeviceLink.swift`**（新）：`DeviceLinkCrypto`（CryptoKit 加解密）/ `DeviceLinkResponder`（老设备：收 `link_request` 弹
+  `DeviceLinkApprovalSheet` 显码+「不是我」，收 `link_release` 加密 token→complete）/ `DeviceLinkStore`+`DeviceLinkView`
+  （新设备：输 6 位→开 socket→输 4 位→`link_ready` 解密→`AuthStore.adoptToken`→发 `.vdDidAdoptAccount` 刷新列表）。
+- `AppleAuth.swift` 加 **`AuthStore.adoptToken(_:)`**（替换匿名身份、清 session）。`StatusSession.swift` 的 `handle` 在
+  `status_update` 前先分支 `link_request`/`link_release`。`AccountView` 加「登录已有账号」入口，`LibraryView` 接审批卡 + adopt 后刷新。
+
+**安全**：4 位码 5 次/2 分钟（暴力≈5/10000，且真主人在自己设备看得到登录尝试）；token 全程 E2E；complete 强制 scope 匹配。
+**已知延后**：/start 的 IP+token 限流（Worker 无 KV 计数基建，本期只做「必须带有效 bearer」最小闸门）。
+
+**未来扩展（spec §11，本期未做）**：CLI/headless 分身登录——让 skill 以「你」的身份登录某账号，**服务器零改动**（CLI 扮演通用
+「新设备」，两处客户端适配：可移植 X25519+AES-GCM、自生成一次性 anon bearer）。方案 A=整把全权令牌复制到 `~/.config`（不可吊销）。
+
+**部署/测试状态（2026-06-28）**：代码完成、Worker 全量测试绿（vitest）、iOS BUILD SUCCEEDED。**Worker 部署 + 端到端两机手测
+DEFERRED 给用户**：`cd ~/code/jianshuo.dev/agent && npx wrangler deploy`（含 migration v4）+ iOS 推 main→TestFlight。
+两个特性分支 `device-link-pairing`（jianshuo.dev + voicedrop 各一），待合并。
+
 ## Known issues / TODO
 
 - A few pre-fix recordings may carry garbage/empty article JSONs from old buggy miner runs; the Gianyar one was re-mined clean. Could sweep R2 for stragglers.
