@@ -140,8 +140,9 @@ final class DeviceLinkStore: NSObject, URLSessionWebSocketDelegate {
     private var priv: Curve25519.KeyAgreement.PrivateKey?
     private var pairingId: String?
     private var ws: URLSessionWebSocketTask?
+    private var wsSession: URLSession?
 
-    func reset() { ws?.cancel(); ws = nil; priv = nil; pairingId = nil; phase = .enterId; message = "" }
+    func reset() { closeSocket(); priv = nil; pairingId = nil; phase = .enterId; message = "" }
 
     // Step 1: send the 6-hex prefix + ephemeral pubkey; open the wait-socket.
     func start(prefix: String) {
@@ -169,6 +170,7 @@ final class DeviceLinkStore: NSObject, URLSessionWebSocketDelegate {
 
     // Step 2: submit the 4-digit code shown on the old device.
     func submit(code: String) {
+        guard phase == .enterCode else { return }
         guard let pid = pairingId, code.range(of: "^[0-9]{4}$", options: .regularExpression) != nil else {
             message = "请输入 4 位验证码"; return
         }
@@ -192,6 +194,7 @@ final class DeviceLinkStore: NSObject, URLSessionWebSocketDelegate {
         var comps = URLComponents(string: "wss://jianshuo.dev/agent/link/socket")!
         comps.queryItems = [URLQueryItem(name: "pairingId", value: pairingId)]
         let session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
+        wsSession = session
         let task = session.webSocketTask(with: comps.url!)
         ws = task
         task.resume()
@@ -202,12 +205,25 @@ final class DeviceLinkStore: NSObject, URLSessionWebSocketDelegate {
         ws?.receive { [weak self] result in
             Task { @MainActor in
                 guard let self else { return }
-                if case .success(let msg) = result {
+                switch result {
+                case .success(let msg):
                     if case .string(let s) = msg { self.handle(s) }
                     self.receive()
+                case .failure(let err):
+                    if (err as NSError).code != URLError.cancelled.rawValue {
+                        self.phase = .error
+                        self.message = "连接断开，请重新发起"
+                    }
                 }
             }
         }
+    }
+
+    private func closeSocket() {
+        ws?.cancel()
+        ws = nil
+        wsSession?.invalidateAndCancel()
+        wsSession = nil
     }
 
     private func handle(_ s: String) {
@@ -224,10 +240,10 @@ final class DeviceLinkStore: NSObject, URLSessionWebSocketDelegate {
                 AuthStore.shared.adoptToken(token)
                 NotificationCenter.default.post(name: .vdDidAdoptAccount, object: nil)
                 phase = .done; message = "登录成功"
-                ws?.cancel(); ws = nil
+                closeSocket()
             } catch { phase = .error; message = "解密失败" }
-        case "link_cancelled": phase = .error; message = "对方已拒绝"
-        case "link_expired": phase = .error; message = "已超时，请重新发起"
+        case "link_cancelled": phase = .error; message = "对方已拒绝"; closeSocket()
+        case "link_expired": phase = .error; message = "已超时，请重新发起"; closeSocket()
         default: break
         }
     }
@@ -238,7 +254,8 @@ final class DeviceLinkStore: NSObject, URLSessionWebSocketDelegate {
         req.setBearer(AuthStore.shared.bearer)
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let (data, _) = try await URLSession.shared.data(for: req)
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        guard resp.isOK else { throw URLError(.badServerResponse) }
         return (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
     }
 }
