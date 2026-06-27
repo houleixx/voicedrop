@@ -411,7 +411,8 @@ git commit -m "feat(agent): write_article stamps lastEditId for exactly-once rep
 - Consumes: `runAgentLoop` (loop.js), `resolveArticles`/`withTopLevelArticles` (article-store.js), `runTool` ctx shape `{env, scope, articleKey, token, origin, editId}` (Task A2 reads `editId`).
 - Produces: `async runEditTurn({ env, scope, articleKey, token, origin, editId, instruction, images, system, history, callClaude }) → { ok, reply, article, hadError }`.
   - Loads the doc from R2, builds the user content (transcript + images + current article + instruction) exactly as today, runs the agent loop, reads the doc back, returns the client-ready doc (`withTopLevelArticles`) as `article`, and a one-line `reply`.
-  - This is the existing `ArticleEditor.onMessage` body, lifted verbatim into a pure function (so the DO becomes thin and this logic is unit-tested). `callClaude` and `history` are injected; the DO supplies its logged call + history rows.
+  - **Self-idempotency (added per A1 review):** right after loading the doc, if `editId && doc.lastEditId === editId`, return the current doc WITHOUT running the loop — so `runEditTurn` is exactly-once on its own, independent of the queue's best-effort `loadDoc` skip. This closes the residual double-apply window (crash after write+stamp, then a transient read blip bypasses the queue skip).
+  - This is the existing `ArticleEditor.onMessage` body, lifted into a pure function (so the DO becomes thin and this logic is unit-tested). `callClaude` and `history` are injected; the DO supplies its logged call + history rows.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -476,6 +477,22 @@ describe("runEditTurn", () => {
     });
     expect(res.ok).toBe(false);
   });
+
+  it("is idempotent on its own — skips the model when the doc already carries this editId", async () => {
+    const env = fakeEnv({
+      "users/u/articles/s.json": JSON.stringify({ schema: 2, createdAt: 1, transcript: "原文", lastEditId: "edit-1", articles: [{ title: "已改", body: "已改 body" }] }),
+    });
+    let claudeCalls = 0;
+    const res = await runEditTurn({
+      env, scope: "users/u/", articleKey: "users/u/articles/s.json",
+      token: "t", origin: "https://jianshuo.dev", editId: "edit-1",
+      instruction: "把标题改成 NEW", images: [], system: "SYS", history: [],
+      callClaude: async () => { claudeCalls++; return { content: [] }; },
+    });
+    expect(claudeCalls).toBe(0);                 // model never invoked
+    expect(res.ok).toBe(true);
+    expect(res.article.articles[0].title).toBe("已改"); // unchanged
+  });
 });
 ```
 
@@ -504,6 +521,15 @@ export async function runEditTurn({ env, scope, articleKey, token, origin, editI
   const obj = await env.FILES.get(articleKey);
   if (!obj) return { ok: false, reply: "", article: null, hadError: true };
   const doc = JSON.parse(await obj.text());
+  // Exactly-once belt-and-suspenders: if this article already carries this
+  // instruction's id, its effect already landed (a prior run wrote + stamped it,
+  // then the DO/queue lost track) — return the current doc without re-running the
+  // model. This makes runEditTurn idempotent ON ITS OWN, independent of the queue's
+  // loadDoc skip (which is best-effort and can be bypassed on a transient read
+  // failure). Closes the only residual exactly-once window from the A1 review.
+  if (editId && doc.lastEditId === editId) {
+    return { ok: true, reply: "", article: withTopLevelArticles(doc), hadError: false };
+  }
   const articles = resolveArticles(doc);
 
   const stableText = [
