@@ -292,12 +292,19 @@ gear → **设置** (redesign "方案二"; the old `ContentView` 3-tab `TabView`
   rendered **with photos混排 inline** (`ArticleBody.segments` splits the body at `[[photo:N]]` markers;
   `PhotoTile` downloads each via the auth'd Files API and shows a full-width square; unreferenced photos
   append at the end). Per-article chip switcher only when >1. **Voice-edit locators** (design "Voice Edit
-  Locators"): while the user holds-to-talk, **line numbers** (第N行, one per real-line-break paragraph) fade
+  Locators"): while the user holds-to-talk, **line numbers** (第N行) fade
   in floating in the **left margin** — absolutely positioned via `.overlay(alignment:.topLeading)` + `offset`
-  so the text never reflows — and **图N badges** fade in on each image's top-left corner. `bodyRows()` flattens
-  the body into numbered paragraph/image rows. The live transcript bubble tints spoken 第N行/图N references
-  accent (`highlightedTranscript`). These are visual locators only — to make "第3行改简洁点/删掉图2"
-  actionable end-to-end the agent worker prompt would need the same numbering convention (not yet wired).
+  so the text never reflows — and **图N badges** fade in on each image's top-left corner. **`bodyRows()` numbers
+  EVERY row — paragraph AND image — on ONE continuous 第N行 counter (2026-06-27)**: a photo marker is its own
+  line and consumes a line number too, so paragraph line numbers accumulate across images and the displayed
+  第N行 lines up 1:1 with the raw body the agent edits (an image row shows BOTH its 第N行 in the margin and its
+  图M badge in the corner). Before this, 第N行 counted text paragraphs only — an image was skipped, so a
+  paragraph after an image showed a number lower than its true line position ("行号对不上"). The agent prompt
+  (`agent/src/index.js`, lines ~60-63) defines the SAME convention (第N行 = N-th non-empty line counting
+  photo-marker lines; 图N = N-th photo, which also has a 第N行) so locating is consistent end-to-end. **These two
+  must change together** — deploying the agent prompt without shipping the matching iOS build (or vice-versa)
+  reintroduces a transient off-by-image mismatch. The live transcript bubble tints spoken 第N行/图N references
+  accent (`highlightedTranscript`, regex `第[0-9]+行|图[0-9]+`).
   ⋯ menu: **发布/更新公众号草稿** ·
   **分享/更新 VD社区** · 系统分享 (labels flip once published/shared) · **编辑 = hold-to-talk voice editing**
   (serial queue, mic-as-indicator — see the agent Worker section). Share text = `composeShareText()`: ONE
@@ -332,6 +339,34 @@ gear → **设置** (redesign "方案二"; the old `ContentView` 3-tab `TabView`
 - **App Store**: 1.0 / build 18 (`eadd7bd`) submitted, `WAITING_FOR_REVIEW`. (Resubmit = cancel review submission via ASC API `PATCH reviewSubmissions/{id} canceled:true`, then dispatch `appstore`.)
 - **TestFlight public beta**: external group "Public Beta", link **https://testflight.apple.com/join/PbzFFRS2** (works once build 18 passes Beta App Review). Private group "Private Beta" has `gyjll@hotmail.com`.
 - Beta review contact reused from Cathier app: Jianshuo Wang / jianshuo@hotmail.com / +8613916146826.
+
+## Tests — backward-compat is the contract (`agent/test/`, `npm test`)
+
+117 vitest cases (run `cd ~/code/jianshuo.dev/agent && npm test`). The guiding rule:
+**the server must forever serve old data AND old clients** — a new app build (e.g. a
+future build 94) ships only after the old contract is pinned green. New version → push
+only once the old one is stable. Coverage by legacy surface:
+
+- **Schema migration** (`article-store.test.js`): v1 (top-level title/body) → schema-2
+  (top-level `articles`+`history`) → schema-3 (`versions[head]`) all migrate in memory
+  without losing content. `resolveArticles`/`withTopLevelArticles` (the SINGLE source of
+  truth every reader shares) are unit-pinned directly, across all three shapes + empty.
+- **Legacy docs on disk through the new API** (`articles-api.test.js`): reading/writing a
+  v1 or schema-2 doc via `GET/PUT /articles/<stem>` reconstructs top-level `articles`,
+  keeps `wechatMediaId`, and a NEW build editing an OLD article keeps the original as v1
+  (undo still works). `/download/<key>` (build ≤77 raw-download clients) reconstructs v1 +
+  schema-2 + schema-3. Anon-token (`anon_…`, the DEFAULT auth path) + `whoami` go through
+  real `onRequest`.
+- **Community** (`community-api.test.js`, new): legacy schema-1 inline posts read verbatim
+  (markers + `photos` array kept), schema-2 pointers resolve the LIVE article (incl. a v1
+  source doc), `list` mixes both schemas newest-first + reaps orphans, the Apple write-gate
+  (anon→403 `needs_apple_signin`, admin→403) and owner-only unshare hold.
+- **Photo markers** (`photo-markers.test.js`): new `[[photo:<relkey>]]` AND legacy
+  `[[photo:N]]` both resolve/strip.
+
+When changing any reader of an article/community doc, add the legacy shape to its test
+BEFORE the change — these are characterization guards (a v1-fallback removal was verified
+to fail 4 of them). Don't delete a legacy branch without deleting its test on purpose.
 
 ## Known issues / TODO
 
