@@ -56,6 +56,7 @@ targets:
         DEVELOPMENT_TEAM: 97XBW2A43H
         TARGETED_DEVICE_FAMILY: "1"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        OTHER_LDFLAGS: "$(inherited) -lz"
       configs:
         # Manual signing only for the App Store build (CI/fastlane). Debug stays
         # automatic so local dev / simulator runs need no profile.
