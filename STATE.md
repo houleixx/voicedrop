@@ -84,10 +84,19 @@ only that one section of a multi-section doc — the app appends it (`shareURL(_
 from `articleIndex`) so a shared link reflects the section the user had selected; absent or
 out-of-range falls back to the full set (old links unchanged). Non-token segment (e.g. `privacy`) →
 `context.next()` (static `/voicedrop/` landing + `/voicedrop/privacy/` untouched).
-Article pages emit **OG + Twitter Card** tags (`og:title`=article title,
-`og:description`=excerpt, `twitter:card=summary_large_image`, `og:image`=static
-**`/voicedrop/og.png`** branded banner 1200×630) so a shared link renders a large
-clickable card on X / WeChat. og.png is a static asset in the Pages repo.
+Article pages emit **share-card meta tags** for X / WeChat (`metaTags()` in `[token].js`,
+unit-pinned by `agent/test/og-tags.test.js`) — **all section-aware** (driven by `?s=<i>`):
+- `og:title` **and `<title>`** = the SELECTED section's title (so s=1/s=2 cards show that
+  section's title, not section 0's).
+- `og:description` **and `<meta name="description">`** = a plain-text excerpt of THAT
+  section's body (markers stripped). **WeChat's link-card crawler reads `<meta name=description>`,
+  NOT `og:description`** — that's why both are emitted.
+- `og:image` (+ `twitter:image` + `<link rel=image_src>`, card upgraded to
+  `summary_large_image`) = **that section's OWN first `[[photo:…]]`** as an ABSOLUTE URL
+  (`https://jianshuo.dev/files/api/photo/<full key>`, the public no-auth photo endpoint).
+  **Each article carries its own image — no recycled static banner** (the old `/voicedrop/og.png`
+  banner was dropped: one image on every share read as spam). A photo-less section emits **no
+  `og:image`** and stays a clean text card (`twitter:card=summary`).
 
 Pages secrets: `FILES_TOKEN`, `SESSION_SECRET`, `GH_DISPATCH_TOKEN`, `WECHAT_RELAY_URL`, `WECHAT_RELAY_SECRET`.
 
