@@ -245,7 +245,39 @@ on their own posts.
   reco **无需 SESSION_SECRET** 也能正确识别所有用户（含 Apple 登录者）。**reco 上当前未设、也不需要
   SESSION_SECRET**（auth.js 仍保留验 JWT 的死代码，无害）。部署独立：
   `cd ~/code/jianshuo.dev/reco && npx wrangler deploy`。
-- **token 计费未做**：将来单独 spec + 单独 D1 库 `voicedrop-usage`，不进 engagement、不进 reco。
+- **token 计费已做（2026-06-28）**：见下面「## 算力计费」。独立 D1 库 `voicedrop-usage`，绑在 **agent worker**（不进 engagement、不进 reco）。
+
+## 算力计费 (usage billing)（2026-06-28 上线）
+
+给每个用户一个**赠送的「算力」额度**，按真实成本扣，扣到 0 停。**算力 = 钱穿了件马甲：23 算力 = ¥1**（锚定钉死）。
+单位**无现金价值、不可提现、不可退款**（绕开记账/退款法务风险）；将来真要「充值收钱」是另一个项目（带支付+法务），本期不做。
+Spec/计划：`docs/superpowers/specs/2026-06-27-voicedrop-usage-billing-design.md` + `docs/superpowers/plans/2026-06-27-voicedrop-usage-billing.md`。
+
+- **落点 = agent worker（不另起 worker）**：计费必须和花钱的地方紧耦合，所有 ASR+Claude 调用都在 `voicedrop-agent`。
+  新 D1 `voicedrop-usage`（binding `USAGE`，id `317b7cd5-e926-49f0-a6c9-497e4740aea8`），`agent/migrations/0001_usage.sql`。
+- **计价单一真源 `agent/src/usage.js`**：`FX=7.3` `RATE=23`；`PRICE`（sonnet $3/$15、haiku $1/$5 每 Mtok）；ASR `¥0.8/小时`。
+  钱一律 **微元（1e-6 元）整数**存，`Math.ceil` 算（只多收不少收，绝不亏）；未知模型成本 0。显示用 `uyToSuanli`/`uyToYuan`。
+  手感：典型录音挖一篇 ≈ 2 算力，haiku 改一刀 ≈ 1.4、sonnet ≈ 4；新用户一次性送 **500 算力**。
+- **D1 两表 `agent/src/usage_store.js`**：`account`(user_sub PK, balance_uy/granted_uy/spent_uy 微元) + `ledger`(只追加流水, kind=grant|spend, reason, detail JSON, balance_uy 快照)。
+  `ensureAccount` 懒建 + 首次送 500（`INSERT OR IGNORE` 防并发首触竞态，只有真创建者落 signup 行）；`debit`/`grant` 用 `db.batch()` 原子化；
+  `editCount` = `COUNT(DISTINCT json_extract(detail,'$.turn_id'))`（数**真实编辑次数**，不是 Claude 调用次数——一次编辑是 agentic 循环含多次调用）。
+- **挖文章计费（`agent/src/miner.js`）**：`meteredMineGate(env.USAGE,scope,durSec,now)` 在 `.json/.empty` skip 之后、ASR 之前判：
+  `>3h→too-long`、余额≤0→`no-credit`、否则 ok。挡住就写 `.blocked` 标记（`{status,reason}`），`no-credit` **非终态**（下次余额够了删标记重挖；`too-long` 终态）。
+  扣费：ASR（`audio_info.duration` 毫秒，有上限钳制防 1000x）+ 每次 Claude（mine 与 text 路径都扣），全 best-effort（`try/catch`+`if(env.USAGE)`，**失败绝不中断挖文章**）。
+- **语音编辑计费（`agent/src/index.js` ArticleEditor）**：`meteredEditGate` 在调 Claude **之前**判（不足/超 100 编辑 → 拒绝、不空花），
+  通过队列广播 `{type:"error",id,message}`（"算力不足，无法继续编辑" / "这篇已达编辑上限（100 次）"），队列把 gate-拒绝标 terminal（不无限重试）；每次编辑 Claude 调用后 best-effort 扣费。
+- **`.blocked` 写入路由**：`functions/files/api/[[path]].js` 的 `PUT articles/<sub>/<stem>/blocked`（镜像 `/empty`）→ R2 key `users/<sub>/articles/<stem>.blocked`；
+  文章 DELETE 时连 `.blocked` 一起清。三处 key 一致：写入路由 = miner stale-delete = iOS/list 检测。
+- **读/admin 路由（agent worker，`handleUsageRoute`）**：`GET /agent/usage/balance`、`GET /agent/usage/ledger?limit=N`（用户自己 scope，401 无 token，D1 缺失/抛错→`degraded` 不崩）；
+  `POST /agent/usage/grant`（**admin `FILES_TOKEN`**，活动送算力的原语，`reason=campaign:*`）、`GET /agent/usage/admin/accounts`（admin，全量）。**admin 路由严格鉴权**，用户路由只读自己。
+- **防滥用硬闸**（独立于余额）：单条录音 ≤3 小时、单篇编辑 ≤100 次（真实编辑数）。¥10 量级余额通常先触发，这俩只拦极端。
+- **iOS**：`UsageView.swift`（算力余额 + 明细 + "无现金价值"说明，从 `/agent/usage/balance|ledger` 读）；入口在 `AccountView.swift` 账户卡；
+  `Library.swift`/`LibraryView.swift` 加 `.blocked` 检测 → 徽标 **余额不足 / 录音过长**（`.json/.empty` 优先）；`AgentSession.swift` 把编辑错误送进 `replyBubble`。
+- **admin 账本页**：`voicedrop/admin/usage.html`（贴 admin token 看全量余额/消费，仿 `mine.html`）。
+- **部署**：worker `cd ~/code/jianshuo.dev/agent && npx wrangler deploy`；Pages `cd ~/code/jianshuo.dev && npx wrangler pages deploy . --project-name jianshuo-dev`。
+  ⚠️ **Pages 部署坑**：根目录有 `.claude/worktrees/*/node_modules`(>25MiB) 会让 `pages deploy .` 报错，且 `.assetsignore` 当前匹配不到深层 node_modules。
+  解法：从 main 的**干净临时 worktree** 部署（`git worktree add --detach <tmp> main` → 在里面 `pages deploy .`），只传已提交内容。`.assetsignore`（排除 `reco/`+`node_modules`）**必须存在**，别误删。
+- **后续可做的小优化（非阻断，已记 `.superpowers/sdd/progress.md`）**：iOS `Entry.id=ts` 同秒可撞（改用 ledger 自增 id）；`fetchBlockReason` 串行可并行；usage 路由测试可补全；负 grant 语义。
 
 ## iOS app (`VoiceDropApp/`)
 
