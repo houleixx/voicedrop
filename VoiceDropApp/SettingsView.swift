@@ -128,6 +128,35 @@ final class SettingsStore {
         } catch {}
     }
 
+    var autoShareCommunity = false
+
+    private struct AppConfig: Codable { var autoShareCommunity: Bool? }
+
+    func loadConfig() async {
+        guard !token.isEmpty else { return }
+        var req = URLRequest(url: base.appending(path: "download").appending(path: "CONFIG.json"))
+        req.setBearer(token)
+        do {
+            let (data, resp) = try await URLSession.shared.data(for: req)
+            let code = resp.httpStatusCode
+            if code == 404 { return }
+            guard (200..<300).contains(code) else { return }
+            guard let cfg = try? JSONDecoder().decode(AppConfig.self, from: data) else { return }
+            autoShareCommunity = cfg.autoShareCommunity ?? false
+        } catch {}
+    }
+
+    func saveConfig() async {
+        guard !token.isEmpty else { return }
+        let cfg = AppConfig(autoShareCommunity: autoShareCommunity)
+        guard let body = try? JSONEncoder().encode(cfg) else { return }
+        var req = URLRequest(url: base.appending(path: "upload").appending(path: "CONFIG.json"))
+        req.httpMethod = "PUT"
+        req.setBearer(token)
+        req.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
+        do { _ = try await URLSession.shared.upload(for: req, from: body) } catch {}
+    }
+
     /// Validate the WeChat credentials before saving. WeChat checks
     /// appid → IP whitelist → secret, so from the app we can format-check both and
     /// catch a non-existent appid (40013); a well-formed secret can only be fully
@@ -279,6 +308,31 @@ struct SettingsView: View {
         return hex.prefix(6).uppercased()
     }
 
+    private var autoShareBinding: Binding<Bool> {
+        Binding(
+            get: { store.autoShareCommunity },
+            set: { newValue in
+                if newValue {
+                    if AuthStore.shared.isAuthenticated {
+                        store.autoShareCommunity = true
+                        Task { await store.saveConfig() }
+                    } else {
+                        Task {
+                            await AuthStore.shared.signInWithApple()
+                            if AuthStore.shared.isAuthenticated {
+                                store.autoShareCommunity = true
+                                await store.saveConfig()
+                            }
+                        }
+                    }
+                } else {
+                    store.autoShareCommunity = false
+                    Task { await store.saveConfig() }
+                }
+            }
+        )
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 14) {
@@ -312,6 +366,11 @@ struct SettingsView: View {
                                     HStack(spacing: 8) { wechatBadge; settingsChevron }
                                 }
                             }.buttonStyle(.plain)
+                            settingsRowDivider
+                            SettingsRow(tileBG: Theme.okBannerBG, symbol: "person.2.fill", tileFG: Theme.greenDone,
+                                        title: "自动分享到 VD社区", subtitle: "挖出新文章后自动发到社区") {
+                                Toggle("", isOn: autoShareBinding).labelsHidden().tint(Theme.accent)
+                            }
                             settingsRowDivider
                             Button { showStyle = true } label: {
                                 SettingsRow(tileBG: Theme.tileNeutral, symbol: "pencil", tileFG: Theme.secondary,
@@ -355,7 +414,7 @@ struct SettingsView: View {
         }
         .background(Theme.appBG.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
-        .task { await store.load(); await store.loadWechat() }
+        .task { await store.load(); await store.loadWechat(); await store.loadConfig() }
         .sheet(isPresented: $showWechat) { WechatSettingsSheet(store: store) }
         .sheet(isPresented: $showStyle) { WritingStyleSheet(store: store) }
         .sheet(isPresented: $showingExport, onDismiss: { exportManager.reset() }) {
