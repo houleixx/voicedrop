@@ -380,6 +380,14 @@ struct SettingsView: View {
                         .buttonStyle(.plain)
                     }
 
+                    // 写作风格 — 紧挨账户下方（独立卡片）
+                    SettingsCard {
+                        Button { showStyle = true } label: {
+                            SettingsRow(tileBG: Theme.tileNeutral, symbol: "pencil", tileFG: Theme.secondary,
+                                        title: "写作风格", subtitle: "成文时模仿这套语气") { settingsChevron }
+                        }.buttonStyle(.plain)
+                    }
+
                     group("发布") {
                         SettingsCard {
                             Button { showWechat = true } label: {
@@ -393,11 +401,6 @@ struct SettingsView: View {
                                         title: "自动分享到 VD社区", subtitle: "挖出新文章后自动发到社区") {
                                 Toggle("", isOn: autoShareBinding).labelsHidden().tint(Theme.accent)
                             }
-                            settingsRowDivider
-                            Button { showStyle = true } label: {
-                                SettingsRow(tileBG: Theme.tileNeutral, symbol: "pencil", tileFG: Theme.secondary,
-                                            title: "写作风格", subtitle: "名字与文风，决定挖文章的语气") { settingsChevron }
-                            }.buttonStyle(.plain)
                         }
                     }
 
