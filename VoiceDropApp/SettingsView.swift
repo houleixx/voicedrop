@@ -38,9 +38,13 @@ final class SettingsStore {
     private let base = API.filesBase
     private var token: String { AuthStore.shared.bearer }
 
-    func compose() -> String {
-        "# 我的名字\n\(name.trimmingCharacters(in: .whitespacesAndNewlines))\n\n# 我的文风\n\(style.trimmingCharacters(in: .whitespacesAndNewlines))\n"
+    // 名字暂留老 CLAUDE.md（名字以后再找正式的家）；文风已迁到 CLAUDE.json，单独走 /style。
+    func composeName() -> String {
+        "# 我的名字\n\(name.trimmingCharacters(in: .whitespacesAndNewlines))\n"
     }
+
+    private struct StylePayload: Encodable { let style: String }
+    private struct StyleResponse: Decodable { let style: String }
 
     static func parse(_ md: String) -> (name: String, style: String) {
         guard let s = md.range(of: "# 我的文风") else {
@@ -59,16 +63,25 @@ final class SettingsStore {
         guard !token.isEmpty else { error = "请先登录"; return }
         loading = true; error = nil
         defer { loading = false }
-        var req = URLRequest(url: base.appending(path: "download").appending(path: "CLAUDE.md"))
-        req.setBearer(token)
+        // 文风：走 /style（读 CLAUDE.json，404 时服务端回退老 CLAUDE.md 的「# 我的文风」段）。
+        var styleReq = URLRequest(url: base.appending(path: "style"))
+        styleReq.setBearer(token)
         do {
-            let (data, resp) = try await URLSession.shared.data(for: req)
+            let (data, resp) = try await URLSession.shared.data(for: styleReq)
             let code = resp.httpStatusCode
-            if code == 404 { return }
-            guard (200..<300).contains(code) else { error = "加载失败"; return }
-            let parsed = Self.parse(String(decoding: data, as: UTF8.self))
-            name = parsed.name; style = parsed.style
+            if (200..<300).contains(code) {
+                if let obj = try? JSONDecoder().decode(StyleResponse.self, from: data) { style = obj.style }
+            } else if code != 404 {
+                error = "加载失败"
+            }
         } catch { self.error = error.localizedDescription }
+        // 名字：暂留老 CLAUDE.md（名字以后再搬家）。
+        var nameReq = URLRequest(url: base.appending(path: "download").appending(path: "CLAUDE.md"))
+        nameReq.setBearer(token)
+        if let (data, resp) = try? await URLSession.shared.data(for: nameReq),
+           (200..<300).contains(resp.httpStatusCode) {
+            name = Self.parse(String(decoding: data, as: UTF8.self)).name
+        }
     }
 
     func articlesPageURL() async throws -> URL {
@@ -91,15 +104,25 @@ final class SettingsStore {
         guard !token.isEmpty else { error = "请先登录"; return }
         saving = true; saved = false; error = nil
         defer { saving = false }
-        var req = URLRequest(url: base.appending(path: "upload").appending(path: "CLAUDE.md"))
-        req.httpMethod = "PUT"
-        req.setBearer(token)
-        req.setValue("text/markdown; charset=utf-8", forHTTPHeaderField: "Content-Type")
         do {
-            let (_, resp) = try await URLSession.shared.upload(for: req, from: Data(compose().utf8))
-            guard resp.isOK else {
-                error = "保存失败"; return
+            // 文风：版本化写回 CLAUDE.json（/style）。空文风跳过（服务端拒绝空写）。
+            let trimmedStyle = style.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedStyle.isEmpty {
+                var styleReq = URLRequest(url: base.appending(path: "style"))
+                styleReq.httpMethod = "PUT"
+                styleReq.setBearer(token)
+                styleReq.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                let payload = try JSONEncoder().encode(StylePayload(style: trimmedStyle))
+                let (_, resp) = try await URLSession.shared.upload(for: styleReq, from: payload)
+                guard resp.isOK else { error = "保存失败"; return }
             }
+            // 名字：暂留老 CLAUDE.md（名字以后再搬家）。
+            var nameReq = URLRequest(url: base.appending(path: "upload").appending(path: "CLAUDE.md"))
+            nameReq.httpMethod = "PUT"
+            nameReq.setBearer(token)
+            nameReq.setValue("text/markdown; charset=utf-8", forHTTPHeaderField: "Content-Type")
+            let (_, nResp) = try await URLSession.shared.upload(for: nameReq, from: Data(composeName().utf8))
+            guard nResp.isOK else { error = "保存失败"; return }
             saved = true
         } catch { self.error = error.localizedDescription }
     }
