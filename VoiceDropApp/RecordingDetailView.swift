@@ -306,16 +306,12 @@ struct RecordingDetailView: View {
                 HStack(spacing: 10) {
                     navPlayButton
                     insertPhotoButton
-                    if versions.count > 1 {
-                        undoRedoGroup
-                            .transition(.opacity.combined(with: .scale(scale: 0.95)))
-                    }
+                    if versions.count > 1 { undoRedoGroup }   // 直接出现，无动画
                     moreMenu   // ⋯ 常驻
                 }
             }
         }
         .padding(.horizontal, 18).padding(.top, 8).padding(.bottom, 8)
-        .animation(.easeInOut(duration: 0.2), value: versions.count > 1)
     }
 
     /// 播放键 + 外圈进度细圆环（取代整条播放条）。点一下播放/暂停；首次播放先下载音频。

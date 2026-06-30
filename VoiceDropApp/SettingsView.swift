@@ -733,6 +733,7 @@ struct WritingStyleSheet: View {
                 } else {
                     HStack(spacing: 6) {
                         Text("v\(currentV)").font(.system(size: 14, weight: .bold)).foregroundStyle(.white)
+                            .lineLimit(1).fixedSize(horizontal: true, vertical: false)   // 「v10」不折行
                         Image(systemName: showVersions ? "chevron.up" : "chevron.down").font(.system(size: 9, weight: .bold)).foregroundStyle(.white)
                     }
                     .padding(.horizontal, 10).padding(.vertical, 5)
