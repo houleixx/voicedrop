@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style> * { -webkit-font-smoothing: antialiased; } ::-webkit-scrollbar { width:0;height:0; } @keyframes sc-spin { to { transform: rotate(360deg); } } </style>
+</helmet>
+
+<div style="min-width:100%;min-height:100vh;width:max-content;box-sizing:border-box;padding:56px;background:#e7e5df;display:flex;flex-direction:column;gap:30px;font-family:-apple-system,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',system-ui,sans-serif;">
+
+  <div style="display:flex;flex-direction:column;gap:8px;max-width:1100px;">
+    <div style="font-size:13px;font-weight:700;letter-spacing:3px;color:#a79f93;text-transform:uppercase;">VoiceDrop · 分享接收</div>
+    <div style="font-size:30px;font-weight:600;color:#2a2521;letter-spacing:0.5px;">风格数据集</div>
+    <div style="font-size:15px;color:#7d766b;max-width:720px;line-height:1.6;">从任意 app 分享文件（文档、网页、图片、音频等）给 VoiceDrop，都会升起这张 sheet：把内容收进「风格数据集」，攒够后一次性提取你的文章风格。新分享排在列表末尾。</div>
+  </div>
+
+  <div style="display:flex;gap:34px;align-items:flex-start;">
+
+    <!-- ░ 分享接收 sheet ░ -->
+    <div style="display:flex;flex-direction:column;gap:12px;flex:none;">
+      <span style="font-size:13px;color:#9b9488;padding-left:4px;">分享到 VoiceDrop · 新文件已加入</span>
+      <x-import component="IOSDevice" from="./ios-frame.jsx" width="380" height="824" hint-size="380px,824px">
+        <div style="height:100%;box-sizing:border-box;background:#EFEAE0;display:flex;flex-direction:column;font-family:-apple-system,'PingFang SC',system-ui;position:relative;">
+          <!-- 下面压着来源 app（模糊底衬） -->
+          <div style="height:88px;flex:none;"></div>
+          <!-- sheet -->
+          <div style="flex:1;background:#FAF6EF;border-radius:18px 18px 0 0;box-shadow:0 -8px 30px rgba(60,48,30,0.16);display:flex;flex-direction:column;overflow:hidden;">
+            <div style="padding:10px 0 2px;display:flex;justify-content:center;flex:none;"><div style="width:38px;height:5px;border-radius:3px;background:#DDD3C2;"></div></div>
+
+            <!-- header -->
+            <div style="padding:12px 20px 12px;display:flex;align-items:center;flex:none;">
+              <div style="flex:1;min-width:0;">
+                <div style="font-size:19px;font-weight:600;color:#2A2521;">风格数据集</div>
+                <div style="font-size:13px;color:#8A8175;margin-top:3px;">已收集 6 项 · 约 2.3 万字</div>
+              </div>
+              <div style="font-size:16px;font-weight:600;color:#8A8175;white-space:nowrap;">关闭</div>
+            </div>
+
+            <!-- 列表 -->
+            <div style="flex:1;overflow:auto;padding:2px 16px 8px;">
+
+              <!-- 已收集的旧项 -->
+              <div style="display:flex;align-items:center;gap:12px;padding:13px 4px;border-bottom:1px solid #EFE7D9;">
+                <div style="width:38px;height:38px;border-radius:9px;background:#EDE6D8;flex:none;display:flex;align-items:center;justify-content:center;"><svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="#7A6E5C" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 2.5h6l4 4v11H5z"/><path d="M11 2.5v4h4"/></svg></div>
+                <div style="flex:1;min-width:0;"><div style="font-size:15px;color:#2A2521;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">关于产品迭代节奏的几点思考</div><div style="font-size:12px;color:#a79f93;margin-top:2px;">文档 · 2,140 字 · 6月20日</div></div>
+              </div>
+              <div style="display:flex;align-items:center;gap:12px;padding:13px 4px;border-bottom:1px solid #EFE7D9;">
+                <div style="width:38px;height:38px;border-radius:9px;background:#E4EBE6;flex:none;display:flex;align-items:center;justify-content:center;"><svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="#5E8A6A" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="10" r="7.5"/><path d="M2.5 10h15M10 2.5c2.2 2 3.3 4.7 3.3 7.5S12.2 15.5 10 17.5C7.8 15.5 6.7 12.8 6.7 10S7.8 4.5 10 2.5z"/></svg></div>
+                <div style="flex:1;min-width:0;"><div style="font-size:15px;color:#2A2521;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">远程团队如何保持写作的一致性</div><div style="font-size:12px;color:#a79f93;margin-top:2px;">网页 · sspai.com · 6月18日</div></div>
+              </div>
+              <div style="display:flex;align-items:center;gap:12px;padding:13px 4px;border-bottom:1px solid #EFE7D9;">
+                <div style="width:38px;height:38px;border-radius:9px;background:#EDE6D8;flex:none;display:flex;align-items:center;justify-content:center;"><svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="#7A6E5C" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 2.5h6l4 4v11H5z"/><path d="M11 2.5v4h4"/></svg></div>
+                <div style="flex:1;min-width:0;"><div style="font-size:15px;color:#2A2521;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">给新同事的一封信</div><div style="font-size:12px;color:#a79f93;margin-top:2px;">文档 · 860 字 · 6月15日</div></div>
+              </div>
+              <div style="display:flex;align-items:center;gap:12px;padding:13px 4px;border-bottom:1px solid #EFE7D9;">
+                <div style="width:38px;height:38px;border-radius:9px;background:#F0E6E2;flex:none;display:flex;align-items:center;justify-content:center;"><svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="#B07A5E" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="3.5" width="15" height="13" rx="2"/><circle cx="7" cy="8" r="1.6"/><path d="M3.5 14l4-3.5 3 2.5 3-3 3 3"/></svg></div>
+                <div style="flex:1;min-width:0;"><div style="font-size:15px;color:#2A2521;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">发布会现场手记（截图）</div><div style="font-size:12px;color:#a79f93;margin-top:2px;">图片 · IMG_2048.png · 6月12日</div></div>
+              </div>
+              <div style="display:flex;align-items:center;gap:12px;padding:13px 4px;border-bottom:1px solid #EFE7D9;">
+                <div style="width:38px;height:38px;border-radius:9px;background:#E8E4EF;flex:none;display:flex;align-items:center;justify-content:center;"><svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="#7A6EA0" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3.5v9.5a2.5 2.5 0 1 1-2-2.45"/><path d="M8 3.5l6-1.5v9a2.5 2.5 0 1 1-2-2.45"/></svg></div>
+                <div style="flex:1;min-width:0;"><div style="font-size:15px;color:#2A2521;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">播客访谈录音节选</div><div style="font-size:12px;color:#a79f93;margin-top:2px;">音频 · 12:40 · 6月8日</div></div>
+              </div>
+
+              <!-- 分组：本次新增 -->
+              <div style="display:flex;align-items:center;gap:8px;padding:16px 4px 6px;">
+                <span style="font-size:11px;font-weight:700;letter-spacing:2px;color:#C0682E;">本次新增</span>
+                <span style="flex:1;height:1px;background:linear-gradient(90deg,#E8C9B8,transparent);"></span>
+              </div>
+              <div style="display:flex;align-items:center;gap:12px;padding:13px 12px;background:#FBF1E9;border:1px solid #E8C9B8;border-radius:11px;">
+                <div style="width:38px;height:38px;border-radius:9px;background:#F3DDCB;flex:none;display:flex;align-items:center;justify-content:center;"><svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="#C0682E" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 2.5h6l4 4v11H5z"/><path d="M11 2.5v4h4"/><path d="M7.5 11h5M7.5 13.5h3"/></svg></div>
+                <div style="flex:1;min-width:0;"><div style="font-size:15px;font-weight:600;color:#9A4A30;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">年中复盘：我们做对了什么</div><div style="font-size:12px;color:#C08A6E;margin-top:2px;">文档 · 3,120 字 · 刚刚</div></div>
+                <svg width="16" height="12" viewBox="0 0 16 12" style="flex:none;"><path d="M1 6l5 5L15 1" fill="none" stroke="#D8593B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </div>
+
+              <!-- URL 解析中 -->
+              <div style="display:flex;align-items:center;gap:12px;padding:13px 12px;margin-top:8px;background:#F6F1E8;border:1px solid #E8DFD0;border-radius:11px;">
+                <div style="width:38px;height:38px;border-radius:9px;background:#E4EBE6;flex:none;display:flex;align-items:center;justify-content:center;position:relative;">
+                  <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="#5E8A6A" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="10" r="7.5"/><path d="M2.5 10h15M10 2.5c2.2 2 3.3 4.7 3.3 7.5S12.2 15.5 10 17.5C7.8 15.5 6.7 12.8 6.7 10S7.8 4.5 10 2.5z"/></svg>
+                </div>
+                <div style="flex:1;min-width:0;"><div style="font-size:15px;color:#6B6357;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">正在解析网页…</div><div style="font-size:12px;color:#a79f93;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">网页 · mp.weixin.qq.com</div></div>
+                <div style="width:18px;height:18px;flex:none;border:2px solid #E0D6C6;border-top-color:#C98A2E;border-radius:50%;animation:sc-spin 0.8s linear infinite;"></div>
+              </div>
+
+              <!-- URL 解析失败 -->
+              <div style="display:flex;align-items:center;gap:12px;padding:13px 12px;margin-top:8px;background:#fff;border:1px solid #E8DFD0;border-radius:11px;">
+                <div style="width:38px;height:38px;border-radius:9px;background:#F1EBE2;flex:none;display:flex;align-items:center;justify-content:center;">
+                  <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="#B0A798" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="10" r="7.5"/><path d="M10 6.2v4.6M10 13.4h.01"/></svg>
+                </div>
+                <div style="flex:1;min-width:0;"><div style="font-size:15px;color:#8A8175;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">解析失败 · 仅存链接</div><div style="font-size:12px;color:#B0A798;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">网页 · zhihu.com/question/6620…</div></div>
+                <div style="flex:none;font-size:13px;font-weight:600;color:#C0682E;padding:5px 11px;border:1px solid #E8C9B8;border-radius:8px;">重试</div>
+              </div>
+
+            </div>
+
+            <!-- 底部操作 -->
+            <div style="flex:none;padding:12px 16px 30px;border-top:1px solid #EFE7D9;background:#FAF6EF;">
+              <!-- 清空数据集 复选（默认选中，隶属提取） -->
+              <div style="display:flex;align-items:center;gap:9px;padding:2px 4px 12px;">
+                <div style="width:20px;height:20px;border-radius:6px;background:#D8593B;flex:none;display:flex;align-items:center;justify-content:center;"><svg width="12" height="9" viewBox="0 0 14 11"><path d="M1 5.5l4 4L13 1" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+                <span style="font-size:13.5px;color:#6B6357;">提取后清空数据集</span>
+                <span style="font-size:12px;color:#a79f93;margin-left:auto;">下次从零开始</span>
+              </div>
+              <div style="display:flex;gap:10px;">
+                <div style="flex:none;padding:0 20px;height:50px;border-radius:10px;background:#fff;border:1px solid #E2D8C8;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:600;color:#2A2521;white-space:nowrap;">继续收集</div>
+                <div style="flex:1;height:50px;border-radius:10px;background:#D8593B;box-shadow:0 4px 14px rgba(216,89,59,0.28);display:flex;align-items:center;justify-content:center;gap:8px;">
+                  <svg width="17" height="17" viewBox="0 0 20 20" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2.5v9"/><path d="M6.5 8L10 11.5 13.5 8"/><path d="M3.5 13.5v2a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-2"/></svg>
+                  <span style="font-size:16px;font-weight:600;color:#fff;white-space:nowrap;">提取文章风格</span>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </x-import>
+    </div>
+
+    <!-- ░ 分享音频 → 直接成文 ░ -->
+    <div style="display:flex;flex-direction:column;gap:12px;flex:none;">
+      <span style="font-size:13px;color:#9b9488;padding-left:4px;">分享的是音频 · 直接生成文章</span>
+      <x-import component="IOSDevice" from="./ios-frame.jsx" width="380" height="824" hint-size="380px,824px">
+        <div style="height:100%;box-sizing:border-box;background:#EFEAE0;display:flex;flex-direction:column;font-family:-apple-system,'PingFang SC',system-ui;position:relative;">
+          <div style="height:150px;flex:none;"></div>
+          <div style="flex:1;background:#FAF6EF;border-radius:18px 18px 0 0;box-shadow:0 -8px 30px rgba(60,48,30,0.16);display:flex;flex-direction:column;overflow:hidden;">
+            <div style="padding:10px 0 2px;display:flex;justify-content:center;flex:none;"><div style="width:38px;height:5px;border-radius:3px;background:#DDD3C2;"></div></div>
+
+            <!-- header -->
+            <div style="padding:12px 20px 8px;display:flex;align-items:center;flex:none;">
+              <div style="flex:1;min-width:0;">
+                <div style="font-size:19px;font-weight:600;color:#2A2521;">从这段录音成文</div>
+                <div style="font-size:13px;color:#8A8175;margin-top:3px;">来自 备忘录 · 已就绪</div>
+              </div>
+              <div style="font-size:16px;font-weight:600;color:#8A8175;white-space:nowrap;">关闭</div>
+            </div>
+
+            <div style="flex:1;overflow:auto;padding:8px 18px 8px;">
+              <!-- 音频卡 -->
+              <div style="background:#fff;border:1px solid #E8DFD0;border-radius:14px;padding:18px;">
+                <div style="display:flex;align-items:center;gap:13px;">
+                  <div style="width:48px;height:48px;border-radius:12px;background:#E8E4EF;flex:none;display:flex;align-items:center;justify-content:center;"><svg width="24" height="24" viewBox="0 0 20 20" fill="none" stroke="#7A6EA0" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3.5v9.5a2.5 2.5 0 1 1-2-2.45"/><path d="M8 3.5l6-1.5v9a2.5 2.5 0 1 1-2-2.45"/></svg></div>
+                  <div style="flex:1;min-width:0;"><div style="font-size:16px;font-weight:600;color:#2A2521;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">语音备忘录 6月30日</div><div style="font-size:12.5px;color:#a79f93;margin-top:3px;">m4a · 8.4 MB</div></div>
+                </div>
+                <!-- 波形 + 时长 -->
+                <div style="display:flex;align-items:center;gap:2px;height:44px;margin-top:16px;">
+                  <div style="flex:1;background:#E8DFCF;border-radius:2px;height:30%;"></div><div style="flex:1;background:#E8DFCF;border-radius:2px;height:55%;"></div><div style="flex:1;background:#E8DFCF;border-radius:2px;height:40%;"></div><div style="flex:1;background:#E8DFCF;border-radius:2px;height:75%;"></div><div style="flex:1;background:#E8DFCF;border-radius:2px;height:60%;"></div><div style="flex:1;background:#E8DFCF;border-radius:2px;height:90%;"></div><div style="flex:1;background:#E8DFCF;border-radius:2px;height:50%;"></div><div style="flex:1;background:#E8DFCF;border-radius:2px;height:70%;"></div><div style="flex:1;background:#E8DFCF;border-radius:2px;height:35%;"></div><div style="flex:1;background:#E8DFCF;border-radius:2px;height:80%;"></div><div style="flex:1;background:#E8DFCF;border-radius:2px;height:45%;"></div><div style="flex:1;background:#E8DFCF;border-radius:2px;height:65%;"></div><div style="flex:1;background:#E8DFCF;border-radius:2px;height:55%;"></div><div style="flex:1;background:#E8DFCF;border-radius:2px;height:85%;"></div><div style="flex:1;background:#E8DFCF;border-radius:2px;height:40%;"></div><div style="flex:1;background:#E8DFCF;border-radius:2px;height:60%;"></div><div style="flex:1;background:#E8DFCF;border-radius:2px;height:30%;"></div><div style="flex:1;background:#E8DFCF;border-radius:2px;height:70%;"></div>
+                </div>
+                <div style="display:flex;align-items:center;gap:12px;margin-top:12px;">
+                  <div style="width:38px;height:38px;border-radius:50%;background:#2A2521;flex:none;display:flex;align-items:center;justify-content:center;"><svg width="14" height="14" viewBox="0 0 14 14" fill="#fff"><path d="M3 2l9 5-9 5z"/></svg></div>
+                  <div style="flex:1;height:4px;border-radius:2px;background:#EDE6D8;position:relative;"><div style="position:absolute;left:0;top:0;bottom:0;width:0;background:#2A2521;border-radius:2px;"></div></div>
+                  <span style="font-size:13px;color:#8A8175;font-variant-numeric:tabular-nums;white-space:nowrap;">06:12</span>
+                </div>
+              </div>
+
+              <!-- 生成设置 -->
+              <div style="font-size:13px;color:#a79f93;font-weight:600;letter-spacing:1px;padding:20px 6px 8px;">生成设置</div>
+              <div style="background:#fff;border:1px solid #ECE3D5;border-radius:5px;overflow:hidden;">
+                <div style="display:flex;align-items:center;gap:12px;padding:14px 15px;border-bottom:1px solid #F0E8DA;"><div style="flex:1;"><div style="font-size:15px;color:#2A2521;">写作风格</div></div><span style="font-size:13.5px;color:#8A8175;max-width:140px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-right:6px;">我写东西偏口语，像跟…</span><svg width="7" height="12" viewBox="0 0 7 12" style="flex:none;"><path d="M1 1l5 5-5 5" fill="none" stroke="#CFC6B6" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+                <div style="display:flex;align-items:center;gap:12px;padding:14px 15px;"><div style="flex:1;"><div style="font-size:15px;color:#2A2521;">识别语言</div></div><span style="font-size:13.5px;color:#8A8175;margin-right:6px;">中文（自动）</span><svg width="7" height="12" viewBox="0 0 7 12" style="flex:none;"><path d="M1 1l5 5-5 5" fill="none" stroke="#CFC6B6" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+              </div>
+              <div style="display:flex;align-items:center;gap:6px;padding:12px 6px 4px;font-size:12.5px;color:#a79f93;line-height:1.55;"><svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="#C98A2E" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;margin-top:1px;"><path d="M11 1.5L3.5 11h5l-1.5 7.5L16.5 9h-5l1.5-7.5z"/></svg><span>预计消耗约 <b style="color:#C98A2E;">6 算力</b> · 转写 + 成文一步完成</span></div>
+            </div>
+
+            <div style="flex:none;padding:12px 16px 30px;border-top:1px solid #EFE7D9;background:#FAF6EF;">
+              <div style="height:52px;border-radius:11px;background:#D8593B;box-shadow:0 4px 14px rgba(216,89,59,0.28);display:flex;align-items:center;justify-content:center;gap:8px;">
+                <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 3.5h9l3 3v10H4z"/><path d="M13 3.5v3h3"/><path d="M6.5 10h7M6.5 12.5h5"/></svg>
+                <span style="font-size:16.5px;font-weight:600;color:#fff;white-space:nowrap;">开始生成文章</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </x-import>
+    </div>
+
+    <!-- ░ 说明 ░ -->
+    <div style="width:300px;flex:none;background:#fff;border:1px solid #ECE3D5;border-radius:12px;padding:22px;display:flex;flex-direction:column;gap:16px;">
+      <div style="font-size:12px;font-weight:700;letter-spacing:2px;color:#a79f93;">交互说明</div>
+      <div style="font-size:13px;color:#7d766b;line-height:1.65;"><b style="color:#2A2521;">任意类型入口</b>：文档 / 网页 / 图片 / 音频都能分享进来，每类用不同底色的方形图标区分，尽量取到标题（取不到则用文件名 / 域名）。</div>
+      <div style="font-size:13px;color:#7d766b;line-height:1.65;"><b style="color:#C0682E;">音频例外</b>：分享的是音频时不进数据集，直接升起「从这段录音成文」界面——显示波形、时长、来源、生成设置，一步转写并成文。</div>
+      <div style="font-size:13px;color:#7d766b;line-height:1.65;"><b style="color:#2A2521;">新项在末尾</b>：本次分享的文件用「本次新增」分割线单独标出、赭红描边高亮，避免和已有项混淆。</div>
+      <div style="font-size:13px;color:#7d766b;line-height:1.65;"><b style="color:#2A2521;">继续收集</b>：收下这条、关掉 sheet，回到刚才的 app 继续分享下一份，数据集留着。</div>
+      <div style="font-size:13px;color:#7d766b;line-height:1.65;"><b style="color:#2A2521;">提取文章风格</b>：主操作，拿整个数据集去分析出一套写作风格（存进「写作风格」的新版本）。</div>
+      <div style="font-size:13px;color:#7d766b;line-height:1.65;"><b style="color:#2A2521;">提取后清空数据集</b>：默认勾选——提取完就清空，下次从零攒；取消则保留、可继续追加再提取。</div>
+      <div style="font-size:13px;color:#7d766b;line-height:1.65;"><b style="color:#2A2521;">分享 URL</b>：进来是链接不是文件，后台抓取正文——期间显示<b style="color:#C98A2E;">转圈占位</b>，成功回填标题；抓不到（登录墙 / 反爬）标灰为「仅存链接」并给<b style="color:#C0682E;">重试</b>。</div>
+    </div>
+
+  </div>
+</div>
+</x-dc>
+</body>
+</html>
