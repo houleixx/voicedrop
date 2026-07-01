@@ -12,6 +12,9 @@ import SwiftUI
 struct StyleDatasetView: View {
     let payload: SharePayload
     let close: () -> Void
+    /// Called after 提取文章风格 succeeds — opens the host app to 我的录音, where the
+    /// 写作风格介绍 article appears once the (async) distill finishes.
+    var openApp: () -> Void = {}
 
     @State private var existing: [DatasetItem] = []
     @State private var newItems: [NewItem] = []
@@ -303,7 +306,7 @@ struct StyleDatasetView: View {
         extracting = true
         let ok = await ShareAPI.extractStyle(clearAfter: clearAfter)
         extracting = false
-        if ok { close() } else { extractFailed = true }
+        if ok { openApp() } else { extractFailed = true }   // 成功 → 跳「我的录音」看进度
     }
 }
 

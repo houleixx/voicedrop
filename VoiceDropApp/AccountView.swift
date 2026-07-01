@@ -8,7 +8,6 @@ struct AccountView: View {
     @State private var settings = SettingsStore()
     @State private var idCopied = false
     @State private var tokenCopied = false
-    @State private var confirmReset = false
     @State private var openingArticles = false
     @State private var showDeviceLink = false
 
@@ -36,7 +35,6 @@ struct AccountView: View {
                     identityCard
                     group("数据") { dataCard }
                     group("转移与同步") { transferCard }
-                    resetCard
                 }
                 .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 40)
             }
@@ -45,12 +43,6 @@ struct AccountView: View {
         .toolbar(.hidden, for: .navigationBar)
         .task { await store.load() }
         .sheet(isPresented: $showDeviceLink) { DeviceLinkView() }
-        .alert("重置身份？", isPresented: $confirmReset) {
-            Button("重置", role: .destructive) { auth.resetAnonymous() }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text("会生成一个全新的匿名 ID，与现有录音和文章解除关联，且无法恢复。")
-        }
     }
 
     // MARK: Identity
@@ -195,25 +187,6 @@ struct AccountView: View {
         }
     }
 
-    // MARK: Reset
-
-    private var resetCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            SettingsCard {
-                Button { confirmReset = true } label: {
-                    HStack {
-                        Text("重置身份").font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.accent)
-                        Spacer()
-                    }
-                    .padding(.vertical, 14).padding(.horizontal, 15).contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
-            Text("会与现有录音和文章解除关联，且无法恢复。")
-                .font(.system(size: 12.5)).foregroundStyle(Theme.faint)
-                .frame(maxWidth: .infinity, alignment: .center)
-        }
-    }
 
     @ViewBuilder private func group<C: View>(_ label: String, @ViewBuilder _ content: () -> C) -> some View {
         VStack(alignment: .leading, spacing: 10) {

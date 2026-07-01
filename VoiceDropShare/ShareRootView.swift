@@ -53,7 +53,7 @@ struct ShareRootView: View {
                     case .image:
                         PhotoComposeView(payload: p, close: close, openApp: openApp)
                     default:
-                        StyleDatasetView(payload: p, close: close)   // web/document/text
+                        StyleDatasetView(payload: p, close: close, openApp: openApp)   // web/document/text
                     }
                 } else {
                     LoadingSheet()
