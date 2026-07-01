@@ -12,7 +12,7 @@
 
 1. **内容类型即路由**，无需用户选「用途」：
    - **音频** → 挖文章（现有音频管道）。
-   - **图片** → 挖文章（造静音占位音频 + 照片，走统一的「无语音+有照片→看图写文」）。
+   - **图片** → 挖文章（造静音占位音频 + 照片，走统一的「无语音+有照片→看图写短文：标题+简短描述」）。
    - **文字 / URL / 文档** → **只进训练风格语料**，不挖文章。
 2. **客户端提取一切文字**（PDF/docx/URL），服务端不碰无原生库的解析/抓取。
 3. **用占位音频统一状态**：图片分享 = app 内「静音录音+拍照」，两者共用同一条挖矿路径，不做两套。
@@ -35,7 +35,7 @@
 微信/相册/Safari/Files ──分享──▶ VoiceDropShare(ShareViewController，按类型路由，无 用途 选择器)
    音频 .m4a ─────────────原样上传───────────────▶ 现有音频管道（挖文章，不动）
    图片 ──▶ 造静音占位 VoiceDrop-<date>-…​.m4a + 图片传 photos/<sessionTs>/
-                                     └─▶ mineOneAudio：ASR空 + 有照片 → 看图写文(vision)  ← 唯一服务端新增
+                                     └─▶ mineOneAudio：ASR空 + 有照片 → 看图写「标题+简短描述」短文  ← 唯一服务端新增
    文字/URL/文档 ──客户端提取正文(ShareExtraction)──▶ VoiceDrop-style-*.txt ──▶ collectStyle 语料库（挖文章不涉及）
 ```
 
@@ -79,13 +79,13 @@
 
 ```
 ASR 完成：
-  有语音            → 照常挖矿（transcript + 照片，如常）
-  无语音 + 有照片    → mineVariant(transcript="", photos=[...])：看图写文，插 [[photo:key]] 标记   ← 新
+  有语音            → 照常挖矿（transcript + 照片，如常，用完整挖矿提示词）
+  无语音 + 有照片    → 专用「图片短文」提示词：给一个简短标题 + 一段简短图片描述，插 [[photo:key]] 标记   ← 新
   无语音 + 无照片    → writeEmpty(no-speech)（照旧）
 ```
 
-- **复用现有 `mineVariant`**（照片当 vision 输入、插 `[[photo:key]]` 标记、`writeArticle`、计费、`maybeAutoShareCommunity` 全不变）。
-- **提示词敏感点（必测）**：`agent/src/prompts/mine.js` 在**空 transcript + 有照片**时要能只凭照片写出图文。可能需一句提示词补丁。这是本设计唯一的提示词风险点。
+- **图片-only 用专门的短提示词，不复用完整挖矿提示词**（`agent/src/prompts/mine.js` 新增一段，例如 `IMAGE_ONLY_SYSTEM`）：没有语音时不要硬写长文，而是**看图起一个简短标题 + 写一段简短的图片描述（几句话即可），用用户的文风**，并在描述里插入 `[[photo:key]]` 标记内联图片。产出仍是标准文章 schema（`{title, body}`），所以 `mineVariant`/`writeArticle`/计费/`maybeAutoShareCommunity` 下游全不变——只是喂进去的 system 提示词换成短版。
+- **提示词敏感点（必测）**：这段短提示词要稳定产出「标题 + 简短描述」而非长文或空洞套话；用几组真实照片验证。这是本设计唯一的提示词风险点。
 - **计费**：`mineVariant` 内已扣 Claude（vision token 由 usage 计）；静音 `.m4a` 的 ASR ≈ 0 费；`meteredMineGate` 按极短时长走余额判定（不触发 too-long）。
 - **ASR**：静音占位仍走现有 `transcribeResumable`（Volcano 对 1s 静音快速返回空）——**不加任何 skip-ASR 特殊处理**（按用户要求，占位就是没声音，随它 ASR）。
 
@@ -121,6 +121,6 @@ ASR 完成：
 ## 待实现时确认的开放点
 
 1. iOS `NSAttributedString` 读 docx 在**扩展进程**内的实测（内存/时长）——Word 文档一般小，预期没问题。
-2. `prompts/mine.js` 在**空 transcript + 有照片**下产出图文的质量 —— 必测，可能一句提示词补丁。
+2. `prompts/mine.js` 新增的 `IMAGE_ONLY_SYSTEM` 短提示词在**空 transcript + 有照片**下的产出质量（标题 + 简短描述，非长文）—— 必测。
 3. 微信 readability（`#js_content`）稳健性 —— 用几篇真实微信文章验证。
 4. 生成合法静音 `.m4a` 的最简法：优先 bundle 一段预制静音资源；备选扩展内 `AVAudioRecorder` 录 1s。
