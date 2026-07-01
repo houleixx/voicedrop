@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import ImageIO
 
 /// The 「看图写一篇」sheet — the Share Extension's landing page for **image**
 /// shares (`ShareRouter`/`ShareRootView` route images here). There is no
@@ -379,12 +380,22 @@ enum SquareCrop {
         }
     }
 
-    /// Load a shared image file URL straight to a square JPEG — safe to call
-    /// off the main actor (`Data(contentsOf:)` + `UIImage(data:)` do no UIKit
-    /// main-thread-only work; `UIGraphicsImageRenderer` drawing is itself
-    /// thread-safe).
-    static func jpeg(fromFile url: URL, maxSide: CGFloat = 1080, maxBytes: Int = 900_000) -> Data? {
-        guard let data = try? Data(contentsOf: url), let image = UIImage(data: data) else { return nil }
-        return jpeg(image, maxSide: maxSide, maxBytes: maxBytes)
+    /// Load a shared image file URL straight to a square JPEG, safe off the main
+    /// actor. **Downsamples during decode** via ImageIO so a huge camera photo
+    /// (tens of MP) never fully decodes into memory — the old `UIImage(data:)`
+    /// path decoded the full-resolution bitmap and OOM-crashed the memory-tight
+    /// Share Extension (~120 MB), which silently killed the whole share (nothing
+    /// uploaded, sheet vanished). The thumbnail's longest edge is capped at
+    /// `maxSide`, so the square crop that follows is ≤ maxSide too.
+    static func jpeg(fromFile url: URL, maxSide: CGFloat = 640, maxBytes: Int = 900_000) -> Data? {
+        guard let src = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+        let opts: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,     // bake in EXIF orientation
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxSide,         // long edge ≤ maxSide, decoded small
+        ]
+        guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else { return nil }
+        return jpeg(UIImage(cgImage: cg), maxSide: maxSide, maxBytes: maxBytes)
     }
 }
