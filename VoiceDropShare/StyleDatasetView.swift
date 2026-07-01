@@ -237,7 +237,13 @@ struct StyleDatasetView: View {
     private func collectDoc(_ url: URL) async {
         let filename = url.lastPathComponent
         let ext = url.pathExtension.lowercased()
-        let extracted = (ext == "pdf") ? extractPDF(url) : extractRichDocument(url)
+        // PDFKit's `.string` and `NSAttributedString(url:)` (docx/rtf) are safe off-main
+        // (not HTML), but a large file can take real time/memory — run detached so parsing
+        // never blocks the main actor (the sheet would otherwise freeze: no spinner, no
+        // taps, and Share Extensions have tight watchdogs).
+        let extracted = await Task.detached(priority: .userInitiated) { () -> String? in
+            ext == "pdf" ? extractPDF(url) : extractRichDocument(url)
+        }.value
         guard let text = extracted?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {
             // Nothing to retry — the local extraction itself produced no text
             // (unsupported/corrupt file), a fresh attempt would fail the same way.
@@ -360,7 +366,7 @@ private struct ExistingRow: View {
 
     private var subtitle: String {
         let label = chineseTypeLabel(item.type)
-        let meta = item.type == "web" ? item.source : formatChars(item.chars)
+        let meta = (item.type == "doc" || item.type == "text") ? formatChars(item.chars) : item.source
         let date = chineseDate(item.collectedAt)
         return [label, meta, date].filter { !$0.isEmpty }.joined(separator: " · ")
     }
@@ -427,7 +433,7 @@ private struct NewItemRow: View {
                 .fill(Color(hex: "F1EBE2"))
                 .frame(width: 38, height: 38)
                 .overlay(
-                    Image(systemName: "questionmark.circle")
+                    Image(systemName: "exclamationmark.circle")
                         .font(.system(size: 16))
                         .foregroundStyle(Color(hex: "B0A798"))
                 )
