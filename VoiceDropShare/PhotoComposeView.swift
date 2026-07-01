@@ -282,14 +282,12 @@ struct PhotoComposeView: View {
             return
         }
 
-        // Silent placeholder LAST — see "Ordering contract" above.
-        guard let silent = Bundle.main.url(forResource: "silent", withExtension: "m4a") else {
-            uploading = false
-            uploadFailed = true
-            return
-        }
-
-        guard await ShareAPI.putFile(silent, name: audioName, contentType: "audio/mp4") else {
+        // Silent placeholder LAST — see "Ordering contract" above. The bytes are
+        // embedded in code (`SilentAudio.data`), NOT a bundled resource, so this
+        // can't silently fail on a missing/unbundled asset in a release build —
+        // the old `Bundle.main.url(forResource:"silent")` could return nil and
+        // orphan every shared photo.
+        guard await ShareAPI.putData(SilentAudio.data, name: audioName, contentType: "audio/mp4") else {
             uploading = false
             uploadFailed = true
             return
