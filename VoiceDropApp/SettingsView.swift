@@ -24,12 +24,12 @@ enum StyleNaming {
     }
 
     /// 文章 chip 标签：缺省「v10 风格」；风格首行是个短名字（≤8 字，蒸馏名本身 ≤5 字）
-    /// 时「v10 王建硕风格」。长首行是手写风格的正文，不当名字用（chip 会变一长条）；
-    /// 名字已以「风格」结尾就不重复拼。style 为 nil = 版本查不到（历史没加载/已修剪）。
+    /// 时直接「v10 王建硕」——名字本身就够，不再拼「风格」。长首行是手写风格的正文，
+    /// 不当名字用（chip 会变一长条）。style 为 nil = 版本查不到（历史没加载/已修剪）。
     static func chipLabel(v: Int, style: String?) -> String {
         let n = style.map { name($0, max: 8) } ?? ""
         guard !n.isEmpty, !n.hasSuffix("…") else { return "v\(v) 风格" }
-        return n.hasSuffix("风格") ? "v\(v) \(n)" : "v\(v) \(n)风格"
+        return "v\(v) \(n)"
     }
 }
 

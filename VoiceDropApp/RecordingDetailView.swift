@@ -63,7 +63,7 @@ struct RecordingDetailView: View {
         guard let a = articles.first else { return nil }
         return a.style ?? ArticleBody.styleVersion(a.body)
     }
-    /// The chip label: "v8 风格", or "v8 王建硕风格" when the version's name is known
+    /// The chip label: "v8 风格", or "v8 王建硕" when the version's name is known
     /// (styleVersions loads async — the label upgrades once history arrives).
     private var currentStyleLabel: String? {
         currentStyleV.map { v in
