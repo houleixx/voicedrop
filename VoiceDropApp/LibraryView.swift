@@ -373,17 +373,19 @@ struct LibraryView: View {
         }
     }
 
-    /// Small circled number ("2") pinned to a row's leading corner while
-    /// holding the red key to talk — the number the user speaks to target
-    /// that recording ("删掉第二条").
+    /// Small number ("2") pinned to a row's top-left corner while holding the red
+    /// key to talk — the number the user speaks to target that recording ("删掉第
+    /// 二条"). Design: a white rounded-square chip with a tan border (Navigation.dc).
     private func numberBadge(_ n: Int) -> some View {
         Text("\(n)")
             .font(.system(size: 12, weight: .bold))
-            .foregroundStyle(.white)
-            .frame(width: 22, height: 22)
-            .background(Circle().fill(Theme.recordRed))
-            .overlay(Circle().stroke(Theme.card, lineWidth: 2))
-            .offset(x: -6, y: -6)
+            .monospacedDigit()
+            .foregroundStyle(Color(hex: "4A4438"))
+            .frame(width: 20, height: 20)
+            .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(.white))
+            .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).stroke(Color(hex: "E4DBCB"), lineWidth: 1))
+            .shadow(color: Color(hex: "3C2D1E").opacity(0.10), radius: 4, x: 0, y: 1)
+            .offset(x: 13, y: 10)
     }
 
     @ViewBuilder private func statusBadge(_ rec: Recording) -> some View {
