@@ -51,35 +51,46 @@ struct LibraryView: View {
         return uploading + optimistic + store.recordings
     }
 
+    // Explicit Binding<Bool> so the SwiftUI view body doesn't pay to type-infer an
+    // inline `.init(get:set:)` per alert — a chain of 4 alerts with inline bindings
+    // blows the Swift type-checker's budget ("unable to type-check in reasonable time",
+    // machine-dependent: passes locally, times out on the slower CI runner).
+    private func clearBinding(_ isSet: @escaping () -> Bool, _ clear: @escaping () -> Void) -> Binding<Bool> {
+        Binding(get: isSet, set: { if !$0 { clear() } })
+    }
+
+    // Split into two typed `some View` properties: the type-checker handles each half
+    // independently, keeping each well under budget. Do NOT re-collapse into one chain.
     var body: some View {
-        mainContent
-            .onChange(of: store.recordings) { _, recs in checkPendingReplies(recs) }
-            .alert("删除这条录音？", isPresented: .init(
-                get: { confirmDelete != nil }, set: { if !$0 { confirmDelete = nil } }
-            ), presenting: confirmDelete) { rec in
-                Button("删除", role: .destructive) { Task { await store.delete(rec) } }
-                Button("取消", role: .cancel) {}
-            } message: { _ in Text("音频和已挖出的文章都会从云端删除，不可恢复。") }
-            .alert("重新生成这篇文章？", isPresented: .init(
-                get: { confirmReprocess != nil }, set: { if !$0 { confirmReprocess = nil } }
-            ), presenting: confirmReprocess) { rec in
-                Button("重新生成", role: .destructive) { Task { await store.deleteArticle(rec) } }
-                Button("取消", role: .cancel) {}
-            } message: { _ in Text("删掉当前文章、保留录音，立即重新挖一遍。生成的内容可能和原来不同。") }
-            .alert("从社区移除？", isPresented: .init(
-                get: { confirmUnshare != nil }, set: { if !$0 { confirmUnshare = nil } }
-            ), presenting: confirmUnshare) { post in
-                Button("移除", role: .destructive) { Task { await community.unshare(post.shareId) } }
-                Button("取消", role: .cancel) {}
-            } message: { _ in Text("社区里将看不到这篇；你的原文章不受影响，以后还能再分享。") }
-            // 语音指令 destructive confirm (e.g. "删掉第二条") — the server asks
-            // before acting; summary is its plain-language description of the action.
-            .alert(confirmPrompt?.summary ?? "确认操作", isPresented: .init(
-                get: { confirmPrompt != nil }, set: { if !$0 { confirmPrompt = nil } }
-            ), presenting: confirmPrompt) { p in
+        rowAlerts
+            .alert(confirmPrompt?.summary ?? "确认操作",
+                   isPresented: clearBinding({ confirmPrompt != nil }, { confirmPrompt = nil }),
+                   presenting: confirmPrompt) { p in
+                // 语音指令 destructive confirm (e.g. "删掉第二条") — the server asks
+                // before acting; summary is its plain-language description of the action.
                 Button("删除", role: .destructive) { command.confirm(p.id); confirmPrompt = nil }
                 Button("取消", role: .cancel) { command.cancel(p.id); confirmPrompt = nil }
             }
+    }
+
+    private var rowAlerts: some View {
+        mainContent
+            .onChange(of: store.recordings) { _, recs in checkPendingReplies(recs) }
+            .alert("删除这条录音？", isPresented: clearBinding({ confirmDelete != nil }, { confirmDelete = nil }),
+                   presenting: confirmDelete) { rec in
+                Button("删除", role: .destructive) { Task { await store.delete(rec) } }
+                Button("取消", role: .cancel) {}
+            } message: { _ in Text("音频和已挖出的文章都会从云端删除，不可恢复。") }
+            .alert("重新生成这篇文章？", isPresented: clearBinding({ confirmReprocess != nil }, { confirmReprocess = nil }),
+                   presenting: confirmReprocess) { rec in
+                Button("重新生成", role: .destructive) { Task { await store.deleteArticle(rec) } }
+                Button("取消", role: .cancel) {}
+            } message: { _ in Text("删掉当前文章、保留录音，立即重新挖一遍。生成的内容可能和原来不同。") }
+            .alert("从社区移除？", isPresented: clearBinding({ confirmUnshare != nil }, { confirmUnshare = nil }),
+                   presenting: confirmUnshare) { post in
+                Button("移除", role: .destructive) { Task { await community.unshare(post.shareId) } }
+                Button("取消", role: .cancel) {}
+            } message: { _ in Text("社区里将看不到这篇；你的原文章不受影响，以后还能再分享。") }
     }
 
     private var mainContent: some View {
