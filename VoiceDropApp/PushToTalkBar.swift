@@ -141,8 +141,13 @@ struct PushToTalkBar: View {
         let recording = dictation.isRecording
         let working = session.state == .working
         return VStack(spacing: 8) {
-            VoiceFeedbackStack(transcript: recording ? dictation.transcript : nil,
-                               reply: agentReply, queue: session.queue, highlightLocators: highlightLocators)
+            // Only mount the feedback stack when it has something to show, so the
+            // idle bar keeps its old zero-gap look (an always-present empty stack
+            // would leave the VStack's 8pt spacing above the pill).
+            if recording || agentReply != nil || !session.queue.isEmpty {
+                VoiceFeedbackStack(transcript: recording ? dictation.transcript : nil,
+                                   reply: agentReply, queue: session.queue, highlightLocators: highlightLocators)
+            }
             pill(recording: recording, working: working)
                 .shadow(color: .black.opacity(0.10), radius: 12, x: 0, y: 5)   // float over the body
         }
