@@ -53,7 +53,14 @@ struct LibraryView: View {
         // store.recordings is ALREADY ordered newest-first (LibraryStore.load → Recording.newestFirst);
         // do NOT re-sort here. Just prepend the in-flight rows (uploading / just-uploaded), which are
         // the newest by definition, so they sit on top.
-        return uploading + optimistic + store.recordings
+        // Server rows that haven't learned their tags yet (list caught up before the
+        // R2 sidecar was read) borrow the uploader's remembered tags — otherwise the
+        // row blinks off its tag page for one load cycle during the handoff.
+        let server = store.recordings.map { rec in
+            guard rec.tags == nil, let t = uploader.pendingTagsByName[rec.audioName] else { return rec }
+            var patched = rec; patched.tags = t; return patched
+        }
+        return uploading + optimistic + server
     }
 
     /// The tag of the page the user is on (nil on 我的录音 / VD社区). A recording
@@ -130,7 +137,14 @@ struct LibraryView: View {
         .onChange(of: allTags) { _, tags in
             // The tab a user is ON can disappear (voice-removed its last tag);
             // fall back to 我的录音 instead of stranding them on a headless page.
-            if case .tag(let t) = tab, !tags.contains(t) { tab = .recordings }
+            // NEVER judge mid-load: enrichment may still be arriving and a
+            // transient tag-less state would bounce the user for nothing.
+            if !store.loading, case .tag(let t) = tab, !tags.contains(t) { tab = .recordings }
+        }
+        .onChange(of: store.loading) { _, isLoading in
+            // Loading just finished — now the tag set is authoritative; if the
+            // page's tag is truly gone (deleted mid-load), fall back once.
+            if !isLoading, case .tag(let t) = tab, !allTags.contains(t) { tab = .recordings }
         }
         .overlay(alignment: .bottom) {
             // The red key (record + press-and-hold voice commands) lives on 我的

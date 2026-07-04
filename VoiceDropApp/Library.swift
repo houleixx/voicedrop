@@ -343,7 +343,7 @@ final class LibraryStore {
             let audios = list.files.filter {
                 RecordingName.isRecordingFile($0.name.components(separatedBy: "/").last ?? $0.name)
             }
-            recordings = audios.map {
+            var next = audios.map {
                 let stem = String($0.name.dropLast(4))
                 return Recording(audioName: $0.name,
                                  uploaded: $0.uploaded ?? "",
@@ -354,25 +354,38 @@ final class LibraryStore {
             // (LibraryView, ExportSheet) reads this order; nobody re-sorts. See Recording.newestFirst.
             .sorted(by: Recording.newestFirst)
 
+            // Re-apply in-flight processing state from WebSocket, and prune stems
+            // that are now done (article or empty marker already landed in R2).
+            for i in next.indices {
+                let stem = next[i].stem
+                if let ph = processingPhase[stem] {
+                    if next[i].hasArticles || next[i].isEmpty {
+                        processingPhase[stem] = nil   // done — clear the in-flight marker
+                    } else {
+                        next[i].phase = ph
+                    }
+                }
+            }
+
+            // Apply EVERY cached enrichment (title / cover / tags) BEFORE publishing
+            // the new array. The tag tabs derive from recordings' tags — publishing
+            // un-enriched rows made allTags transiently empty on every reload, which
+            // bounced the user off the tag page they were on.
+            for i in next.indices where next[i].hasArticles {
+                next[i].articleTitle = titleCache[next[i].articleKey]
+                next[i].coverPhotoKey = coverCache[next[i].articleKey].flatMap { $0.isEmpty ? nil : $0 }
+                next[i].tags = tagsCache[next[i].articleKey].flatMap { $0.isEmpty ? nil : $0 }
+            }
+            recordings = next
+
+            // ── Async late enrichment (in place, after publish) ──────────────────
+
             // Fetch block reasons (.blocked marker) for recordings the worker couldn't mine.
             // .json / .empty take precedence — only fetch when neither is present.
             for i in recordings.indices {
                 guard !recordings[i].hasArticles, !recordings[i].isEmpty,
                       names.contains(recordings[i].blockedKey) else { continue }
                 recordings[i].blockReason = await fetchBlockReason(recordings[i].stem)
-            }
-
-            // Re-apply in-flight processing state from WebSocket, and prune stems
-            // that are now done (article or empty marker already landed in R2).
-            for i in recordings.indices {
-                let stem = recordings[i].stem
-                if let ph = processingPhase[stem] {
-                    if recordings[i].hasArticles || recordings[i].isEmpty {
-                        processingPhase[stem] = nil   // done — clear the in-flight marker
-                    } else {
-                        recordings[i].phase = ph
-                    }
-                }
             }
 
             // A recording still mining may carry a pending .tags sidecar (recorded
@@ -388,13 +401,6 @@ final class LibraryStore {
                 }
             }
 
-            // Apply cached titles + cover-photo keys immediately, then fetch any
-            // missing ones so 已成文 rows show the article title and its first photo.
-            for i in recordings.indices where recordings[i].hasArticles {
-                recordings[i].articleTitle = titleCache[recordings[i].articleKey]
-                recordings[i].coverPhotoKey = coverCache[recordings[i].articleKey].flatMap { $0.isEmpty ? nil : $0 }
-                recordings[i].tags = tagsCache[recordings[i].articleKey].flatMap { $0.isEmpty ? nil : $0 }
-            }
             await fetchMissingTitles()
         } catch {
             self.error = error.localizedDescription
