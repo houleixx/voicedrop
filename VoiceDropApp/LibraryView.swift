@@ -361,6 +361,11 @@ struct LibraryView: View {
                     }
                     statusBadge(rec)
                 }
+                if let tags = rec.tags, !tags.isEmpty {
+                    Text(tags.map { "#" + $0 }.joined(separator: "  "))
+                        .font(.system(size: 11)).foregroundStyle(Theme.metaChrome)
+                        .lineLimit(1).truncationMode(.tail)
+                }
             }
             Spacer(minLength: 6)
             Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.chevron)

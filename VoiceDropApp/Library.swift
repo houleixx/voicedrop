@@ -190,6 +190,7 @@ struct Recording: Identifiable, Hashable {
     let hasArticles: Bool
     let isEmpty: Bool            // a `articles/<stem>.empty` marker exists (no usable speech)
     var articleTitle: String?    // first mined article's title; fills the place slot once 已成文
+    var tags: [String]?          // article tags (语音 tag_article 归类) — shown as small text under the meta line
     var coverPhotoKey: String?   // rel R2 key of the article's FIRST photo; shown as the row's left icon (nil → waveform)
     var uploading: Bool = false  // a local take still in the upload queue (not yet on the server)
     var phase: MiningPhase? = nil // server is actively mining this right now (WebSocket push); nil = not in-flight
@@ -359,6 +360,11 @@ final class LibraryStore {
                 recordings[i].articleTitle = titleCache[recordings[i].articleKey]
                 recordings[i].coverPhotoKey = coverCache[recordings[i].articleKey].flatMap { $0.isEmpty ? nil : $0 }
             }
+            // Tags come from the articles list summary in ONE call and are applied
+            // fresh on every load — no per-doc cache, so a voice tag_article command
+            // (add or remove) is reflected as soon as the list refreshes.
+            let tagMap = await fetchTagsByStem()
+            for i in recordings.indices { recordings[i].tags = tagMap[recordings[i].stem] }
             await fetchMissingTitles()
         } catch {
             self.error = error.localizedDescription
@@ -393,6 +399,22 @@ final class LibraryStore {
                 coverCache[recordings[idx].articleKey] = cover
             }
         }
+    }
+
+    /// stem → tags, from GET /articles (the list summary carries `tags` only for
+    /// articles that have any). Best-effort: on any failure the map is empty and
+    /// rows simply show no tag line.
+    private func fetchTagsByStem() async -> [String: [String]] {
+        struct Resp: Decodable {
+            struct Item: Decodable { let stem: String; let tags: [String]? }
+            let articles: [Item]
+        }
+        guard let url = URL(string: "\(base.absoluteString)/articles") else { return [:] }
+        var req = URLRequest(url: url)
+        req.setBearer(token)
+        guard let (data, resp) = try? await URLSession.shared.data(for: req), resp.isOK,
+              let r = try? JSONDecoder().decode(Resp.self, from: data) else { return [:] }
+        return .init(uniqueKeysWithValues: r.articles.compactMap { i in i.tags.map { (i.stem, $0) } })
     }
 
     private func downloadURL(_ relName: String) -> URL {
