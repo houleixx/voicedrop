@@ -946,13 +946,14 @@ struct PhotoTile: View {
     private let retryOra = Color(red: 0.753, green: 0.408, blue: 0.180)   // #C0682E
 
     var body: some View {
+        // 占位态保持 1:1 正方形；图加载成功后壳子跟随图片真实宽高比，横图竖图不再被裁方。
         RoundedRectangle(cornerRadius: 12)
             .fill(Theme.card)
-            .aspectRatio(1, contentMode: .fit)
+            .aspectRatio(image.map { $0.size.width / max($0.size.height, 1) } ?? 1, contentMode: .fit)
             .frame(maxWidth: .infinity)
             .overlay {
                 if let img = image {
-                    Image(uiImage: img).resizable().scaledToFill().clipShape(RoundedRectangle(cornerRadius: 12))
+                    Image(uiImage: img).resizable().scaledToFit().clipShape(RoundedRectangle(cornerRadius: 12))
                 } else if failed {
                     failedView
                 } else if showMaking {
@@ -972,6 +973,7 @@ struct PhotoTile: View {
                     }
                 }
             }
+            .animation(.easeInOut(duration: 0.25), value: image != nil)
             .task(id: "\(relKey)#\(reloadToken)") { await load() }
     }
 

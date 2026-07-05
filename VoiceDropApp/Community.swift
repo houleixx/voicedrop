@@ -746,20 +746,22 @@ struct CommunityPhotoTile: View {
     @State private var image: UIImage?
 
     var body: some View {
+        // 占位态保持 1:1 正方形；图加载成功后壳子跟随图片真实宽高比（与详情页 PhotoTile 同规则）。
         RoundedRectangle(cornerRadius: 12)
             .fill(Theme.card)
-            .aspectRatio(1, contentMode: .fit)
+            .aspectRatio(image.map { $0.size.width / max($0.size.height, 1) } ?? 1, contentMode: .fit)
             .frame(maxWidth: .infinity)
             .overlay {
                 if let img = image {
                     Image(uiImage: img)
-                        .resizable().scaledToFill()
+                        .resizable().scaledToFit()
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                 } else {
                     ProgressView().tint(Theme.accent)
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: 12))
+            .animation(.easeInOut(duration: 0.25), value: image != nil)
             // Bind to the key (not view identity) so a shifted marker re-fetches.
             .task(id: fullKey) {
                 image = nil
