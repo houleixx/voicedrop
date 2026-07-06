@@ -7,6 +7,9 @@ struct AccountView: View {
     @State private var store = LibraryStore()
     @State private var idCopied = false
     @State private var tokenCopied = false
+    @State private var showDeleteConfirm = false
+    @State private var deleting = false
+    @State private var deleteError: String? = nil
 
     private var auth: AuthStore { AuthStore.shared }
     private var recordingCount: Int { store.recordings.count }
@@ -32,6 +35,7 @@ struct AccountView: View {
                     identityCard
                     group("数据") { dataCard }
                     group("转移与同步") { transferCard }
+                    group("账户管理") { deleteCard }
                 }
                 .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 40)
             }
@@ -39,6 +43,17 @@ struct AccountView: View {
         .background(Theme.appBG.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
         .task { await store.load() }
+        .confirmationDialog("永久删除账户？", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
+            Button("永久删除", role: .destructive) { Task { await deleteAccount() } }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("将永久删除你的全部数据：云端录音、文章、照片、设置、社区分享和 Apple 登录绑定，本机数据也会清空。此操作不可恢复。")
+        }
+        .alert("删除失败", isPresented: .init(get: { deleteError != nil }, set: { if !$0 { deleteError = nil } })) {
+            Button("好", role: .cancel) { deleteError = nil }
+        } message: {
+            Text(deleteError ?? "")
+        }
     }
 
     // MARK: Identity
@@ -162,6 +177,63 @@ struct AccountView: View {
         }
     }
 
+
+    // MARK: Delete account (Apple 5.1.1(v))
+
+    /// In-app account deletion: the server erases everything under this user
+    /// (recordings, articles, photos, settings, community posts, share links,
+    /// Apple binding), then we wipe local state and mint a brand-new empty
+    /// anonymous identity.
+    private var deleteCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SettingsCard {
+                Button { showDeleteConfirm = true } label: {
+                    HStack {
+                        Text("删除账户").font(.system(size: 16)).foregroundStyle(Color(red: 1, green: 0.23, blue: 0.19))
+                        Spacer()
+                        if deleting { ProgressView().controlSize(.small) }
+                    }
+                    .padding(.vertical, 14).padding(.horizontal, 15)
+                }
+                .buttonStyle(.plain)
+                .disabled(deleting)
+            }
+            Text("永久删除云端与本机的全部数据（录音、文章、照片、设置、社区分享、Apple 登录绑定），不可恢复。")
+                .font(.system(size: 12.5)).foregroundStyle(Theme.faint)
+                .fixedSize(horizontal: false, vertical: true).padding(.horizontal, 4)
+        }
+    }
+
+    private func deleteAccount() async {
+        deleting = true
+        defer { deleting = false }
+        var req = URLRequest(url: API.filesBase.appending(path: "account").appending(path: "delete"))
+        req.httpMethod = "POST"
+        req.setBearer(auth.bearer)
+        do {
+            let (_, resp) = try await URLSession.shared.data(for: req)
+            guard resp.isOK else {
+                deleteError = "服务器返回 \(resp.httpStatusCode)，请稍后再试。"
+                return
+            }
+        } catch {
+            deleteError = error.localizedDescription
+            return
+        }
+        // Server side is gone — wipe everything local, then start a fresh
+        // empty identity so the app behaves like a brand-new install.
+        let fm = FileManager.default
+        if let docs = fm.urls(for: .documentDirectory, in: .userDomainMask).first,
+           let items = try? fm.contentsOfDirectory(at: docs, includingPropertiesForKeys: nil) {
+            for u in items { try? fm.removeItem(at: u) }
+        }
+        if let bid = Bundle.main.bundleIdentifier {
+            UserDefaults.standard.removePersistentDomain(forName: bid)
+        }
+        auth.signOut()          // drop the Apple session JWT
+        auth.resetAnonymous()   // brand-new anon token (also re-published to the Share Extension)
+        dismiss()
+    }
 
     @ViewBuilder private func group<C: View>(_ label: String, @ViewBuilder _ content: () -> C) -> some View {
         VStack(alignment: .leading, spacing: 10) {

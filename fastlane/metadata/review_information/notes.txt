@@ -3,27 +3,47 @@ needed — the app works immediately on first launch. Microphone is used for the
 core recording feature; location (optional, can be denied) only tags the
 filename with the current city/district.
 
-USER-GENERATED CONTENT — Guideline 1.2 compliance
-"VD社区" (VD Community) lets users share their own articles publicly. All four
+ACCOUNT DELETION — Guideline 5.1.1(v)
+Settings (设置) → 账户 (Account) → 删除账户 (Delete Account). After a
+confirmation dialog, the server permanently erases ALL of the user's data —
+recordings, articles, photos, settings, community posts, public share links,
+and the Sign-in-with-Apple binding — and the app clears all local data and
+returns to a brand-new empty state. The flow is fully in-app, immediate, and
+irreversible (no deactivation, no customer-service step).
+
+BACKGROUND AUDIO — Guideline 2.5.4
+VoiceDrop is a voice-dictation recorder. The UIBackgroundModes "audio" key is
+required for background RECORDING (a documented use of this mode): users start
+a recording and then lock the screen or leave the app while continuing to
+speak — often for many minutes of hands-free dictation. The app also exposes a
+"Start recording" App Shortcut (lock-screen / Action-button) that records with
+the screen locked. Without the audio background mode, recordings would be cut
+off the moment the phone locks. A screen recording demonstrating recording
+continuing on the Home Screen / lock screen is attached.
+
+USER-GENERATED CONTENT — Guideline 1.2 compliance (age rating set to 18+)
+"VD社区" (VD Community) lets users share their own articles publicly. All
 required safeguards are implemented:
 
-1) Filtering of objectionable content (before it is posted): every article is
-   automatically screened by an LLM moderation pass at generation time. Any
-   article flagged as objectionable (sexual, violent, hateful, harassing,
-   illegal, self-harm, etc.) cannot be shared to the community — the server
-   rejects the share.
+1) Filtering of objectionable content (before it is posted): when a user shares
+   an article to the community, the server automatically screens the full text
+   and rejects the share if objectionable content (sexual, violent, hateful,
+   harassing, illegal, self-harm, etc.) is detected.
 
 2) Report mechanism + timely action: every community post has a "举报" (Report)
    action in its ⋯ menu. Reporting IMMEDIATELY removes the post from the public
    feed (hidden pending review) — not just down-ranked. Reports go to an internal
    moderation queue that the operator reviews and acts on within 24 hours
-   (permanent removal or restore).
+   (permanent removal of the content and ejection of the offending user).
 
 3) Block abusive users: every post's ⋯ menu has "屏蔽此用户" (Block this user).
    A blocked author's content is hidden from that user everywhere. Blocked users
    can be managed/unblocked in Settings → 已屏蔽用户.
 
-4) Published contact + EULA with zero tolerance: before a user's FIRST community
+4) Users can immediately remove posts from the feed: reporting hides any post
+   instantly, and owners can 取消分享 (Unshare) their own posts at any time.
+
+5) Published contact + EULA with zero tolerance: before a user's FIRST community
    post, they must agree to a community agreement (社区公约 / EULA) that states a
    zero-tolerance policy for objectionable content and abusive behavior. The
    agreement and a "联系我们 / 内容投诉" (Contact / Report content) link are in
@@ -31,3 +51,4 @@ required safeguards are implemented:
 
 To test: open the VD社区 tab, open any post, tap ⋯ to see Report / Block. The
 agree-gate appears the first time you toggle "VD社区可见" on a recording.
+Account deletion: 设置 → 账户 → 删除账户.
