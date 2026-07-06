@@ -648,6 +648,33 @@ final class LibraryStore {
         return r.head
     }
 
+    /// 小红书内容包：把这篇文章转成小红书笔记文案 + 配图 key 列表（POST /agent/xhs-pack）。
+    /// 发布动作在客户端完成：文案进剪贴板、配图走 ShareSheet，用户在小红书里粘贴发布。
+    struct XHSPack: Decodable {
+        let title: String
+        let body: String
+        let tags: [String]
+        let photoKeys: [String]
+        /// 剪贴板全文：标题 + 正文 + #标签行。
+        var clipboardText: String {
+            let tagLine = tags.isEmpty ? "" : "\n\n" + tags.map { "#\($0)" }.joined(separator: " ")
+            return title + "\n\n" + body + tagLine
+        }
+    }
+    func xhsPack(_ rec: Recording) async -> XHSPack? {
+        guard !token.isEmpty, rec.hasArticles,
+              let url = URL(string: "\(API.agentBase.absoluteString)/xhs-pack") else { return nil }
+        struct Req: Encodable { let stem: String }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setBearer(token)
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try? JSONEncoder().encode(Req(stem: rec.stem))
+        req.timeoutInterval = 120   // one LLM rewrite call
+        guard let (data, resp) = try? await URLSession.shared.data(for: req), resp.isOK else { return nil }
+        return try? JSONDecoder().decode(XHSPack.self, from: data)
+    }
+
     /// 重写：复用已有 ASR，按原挖矿逻辑用当前文风重挖（POST /agent/restyle {stem}，不带 styleV →
     /// 服务端用文风 head，可重新拆多篇）。写文章新版本、转写不动。期间标记 reminingStems，成功后刷新。
     func remine(_ rec: Recording) async {

@@ -24,6 +24,7 @@ struct RecordingDetailView: View {
     @State private var publishAfterSetup = false
     @State private var toast: String?
     @State private var sharePayload: SharePayload?
+    @State private var xhsWorking = false
     @State private var community = CommunityStore()
     @State private var published = false            // already has a WeChat draft
     @State private var sharedToCommunity = false    // already shared to the community
@@ -422,6 +423,10 @@ struct RecordingDetailView: View {
             Button { Task { await share() } } label: {
                 Label("分享", systemImage: "square.and.arrow.up")
             }
+            Button { Task { await shareToXHS() } } label: {
+                Label(xhsWorking ? "正在生成小红书文案…" : "分享到小红书", systemImage: "book.closed")
+            }
+            .disabled(xhsWorking)
             Divider()
             Button(role: .destructive) { confirmDeleteFromDetail = true } label: {
                 Label("删除", systemImage: "trash")
@@ -468,6 +473,33 @@ struct RecordingDetailView: View {
               let scope = await store.ownerScope(),
               let data = await store.photoData(fullKey: scope + relKey) else { return nil }
         return UIImage(data: data)
+    }
+
+    /// 分享到小红书（第一期：内容包 + 剪贴板直达）：服务端把文章转成小红书文案
+    /// （标题≤20字、正文≤1000字、3–5个标签），全文写进剪贴板；文章配图（≤9张）
+    /// 走 ShareSheet 分享给小红书 App，用户在发布页长按粘贴文案即可。
+    private func shareToXHS() async {
+        guard !xhsWorking else { return }
+        xhsWorking = true
+        defer { xhsWorking = false }
+        guard let pack = await store.xhsPack(recording) else {
+            showToast("小红书文案生成失败，稍后再试")
+            return
+        }
+        UIPasteboard.general.string = pack.clipboardText
+        var images: [UIImage] = []
+        if !pack.photoKeys.isEmpty, let scope = await store.ownerScope() {
+            for relKey in pack.photoKeys.prefix(9) {   // 小红书一篇最多 9 图
+                if let data = await store.photoData(fullKey: scope + relKey),
+                   let img = UIImage(data: data) { images.append(img) }
+            }
+        }
+        if images.isEmpty {
+            showToast("文案已复制。这篇没有配图，去小红书选一张图后粘贴文案")
+            return
+        }
+        showToast("文案已复制，分享图片到小红书后粘贴")
+        sharePayload = SharePayload(text: pack.clipboardText, images: images)
     }
 
     private func toggleCommunity(_ visible: Bool) async {
@@ -857,12 +889,14 @@ struct SharePayload: Identifiable {
     var url: URL? = nil
     var title: String = "VoiceDrop"
     var image: UIImage? = nil
+    var images: [UIImage] = []   // 小红书通道：只给图（文案在剪贴板，混入文本项会被它的分享扩展拒收）
     var id: String { text }
 
-    /// The activity items handed to `UIActivityViewController`. With a URL we wrap
-    /// everything in `ArticleShareItem` (per-target adaptation); without one it's
-    /// plain text (no card possible anyway).
+    /// The activity items handed to `UIActivityViewController`. With `images` it's
+    /// a pure-image share (小红书). With a URL we wrap everything in `ArticleShareItem`
+    /// (per-target adaptation); without one it's plain text (no card possible anyway).
     var activityItems: [Any] {
+        if !images.isEmpty { return images }
         guard let url else { return [text] }
         return [ArticleShareItem(text: text, url: url, title: title, image: image)]
     }
