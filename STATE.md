@@ -110,6 +110,7 @@ scopes every request to `users/<sub>/`.
 `functions/files/api/[[path]].js` — routes (all but `auth/apple` require a token):
 - `POST auth/apple` — exchange Apple identity token → session JWT.
 - `GET  list` / `GET download/<key>` / `PUT upload/<key>` / `DELETE file/<key>`.
+- **`POST account/delete`** — **账号删除（Apple 5.1.1(v)，2026-07-06）**：永久删除调用者的一切——`users/<sub>/` 全部对象、本人社区帖（owner==scope）+ 其举报标记、指向本人 scope 的 `shares/<id>` 短链、`links/apple-<sub>.json` Apple 绑定。admin/只读 token 400/403；匿名与 Apple 登录用户皆可。iOS 入口：设置→账户→账户管理→删除账户（确认弹窗→调接口→清本机 Documents+UserDefaults→`signOut`+`resetAnonymous` 全新空身份）。算力 D1 账本（agent worker）不动——计费流水保留，user_sub 成孤儿无害。测试 `agent/test/account-delete.test.js`。
 - `GET  whoami` — returns the caller's resolved data scope `{scope:"users/<sub>/"}`. The app caches it (`LibraryStore.ownerScope()`) and joins `scope + relKey` to load its OWN photos from the public `photo/<key>` endpoint — so even the owner's detail view uses the one photo URL, not the scoped download.
 - `GET  share/<articleKey>` → `{url:"https://jianshuo.dev/voicedrop/<id>"}` (signs + stores `shares/<id>`).
 - `POST mine` → dispatches `mine.yml` (token = `GH_DISPATCH_TOKEN` Pages secret). Dormant — the app's 加急处理 button was removed; kept for manual/debug use.
@@ -346,6 +347,11 @@ notes `fastlane/metadata/review_information/notes.txt`):
   never sent to the server**; the feed filters blocked authors client-side. Managed in 设置 → 已屏蔽用户.
 - **④ EULA + contact:** first time a user toggles 「VD社区可见」, `CommunityTermsSheet` (社区公约, zero-tolerance)
   must be agreed (`CommunityTerms.agreed`). 设置 has 社区公约 + 联系我们/内容投诉 (mailto `jianshuo@hotmail.com`).
+
+**2026-07-06 review (1.0 build 160) rejected on 3 counts** — response in progress:
+- 5.1.1(v) no account deletion → **fixed**: `POST account/delete` (Files API) + 设置→账户→删除账户 (`AccountView.swift`), see Files API section.
+- 1.2 UGC boilerplate again → all four pillars were already in build 160; the missing piece is the **App Store Connect age rating must be 18+** (ASC metadata, not code). Review notes updated (`fastlane/metadata/review_information/notes.txt`) to spell out every bullet incl. 18+, immediate-removal (report + unshare), 24h SLA + ejection.
+- 2.5.4 UIBackgroundModes audio "plays no audible content" → it's for background RECORDING (legit use of the audio mode: lock-screen dictation + App Shortcut record). Keep the key; reply needs a physical-device screen recording showing recording continuing on the Home Screen.
 
 App Store status: 1.0 / **build 101** submitted `WAITING_FOR_REVIEW` (2026-06-28, the UGC-compliant build).
 Resubmit playbook = ASC API delete `appStoreVersionSubmission` (or cancel reviewSubmission) → PATCH version
