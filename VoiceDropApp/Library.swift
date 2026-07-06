@@ -23,6 +23,17 @@ struct ArticleVersionEntry: Decodable {
 
 /// The `articles/<stem>.json` document the server miner writes. Handles both the
 /// v2 schema (`articles: [...]`) and the v1 schema (a single `title`/`body`).
+/// One 追问 (editor follow-up question) — doc-level sidecar written by the miner.
+/// Never part of the article body/version content; answered by push-to-talk and
+/// woven into the body via the edit agent.
+struct FollowupQuestion: Decodable, Identifiable, Equatable {
+    let id: String
+    let articleIndex: Int?
+    let text: String
+    var status: String          // pending | answered | skipped
+    let createdAt: Double?      // ms epoch (server Date.now())
+}
+
 struct ArticleDoc: Decodable {
     let id: String?
     let sourceAudio: String?
@@ -32,6 +43,8 @@ struct ArticleDoc: Decodable {
     let articles: [MinedArticle]?
     /// Article tags (doc-level; written by voice tag_article or the .tags sidecar).
     let tags: [String]?
+    /// 追问 sidecar (doc-level; written by the miner, status patched by the app).
+    let questions: [FollowupQuestion]?
     /// Relative R2 keys for photos taken during this recording session.
     /// e.g. ["photos/2026-06-24-131500/23-k7p.jpg"]  (23 = 第23秒, k7p = 防撞随机尾)
     let photos: [String]?
@@ -727,6 +740,21 @@ final class LibraryStore {
             guard let r = try? JSONDecoder().decode(Resp.self, from: data) else { return VersionHistory(versions: [], head: 0) }
             return VersionHistory(versions: r.versions, head: r.head)
         } catch { return VersionHistory(versions: [], head: 0) }
+    }
+
+    /// Update one 追问's status on the server (answered/skipped) — metadata-only
+    /// write, no new version. Fire-and-forget like patchHead.
+    func patchQuestion(_ rec: Recording, id: String, status: String) async {
+        guard !token.isEmpty, rec.hasArticles else { return }
+        let enc = rec.stem.urlPathEncoded
+        guard let url = URL(string: "\(base.absoluteString)/articles/\(enc)/question"),
+              let body = try? JSONEncoder().encode(["id": id, "status": status]) else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "PATCH"
+        req.setBearer(token)
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = body
+        _ = try? await URLSession.shared.data(for: req)
     }
 
     /// Move the head pointer on the server (undo/redo sync). Fire-and-forget: returns

@@ -191,8 +191,10 @@ final class SettingsStore {
     }
 
     var autoShareCommunity = false
+    /// 成文后追问（默认开）。服务端挖矿读 CONFIG.noFollowups 决定是否附追问。
+    var followupsEnabled = true
 
-    private struct AppConfig: Codable { var autoShareCommunity: Bool? }
+    private struct AppConfig: Codable { var autoShareCommunity: Bool?; var noFollowups: Bool? }
 
     func loadConfig() async {
         guard !token.isEmpty else { return }
@@ -205,12 +207,14 @@ final class SettingsStore {
             guard (200..<300).contains(code) else { return }
             guard let cfg = try? JSONDecoder().decode(AppConfig.self, from: data) else { return }
             autoShareCommunity = cfg.autoShareCommunity ?? false
+            followupsEnabled = !(cfg.noFollowups ?? false)
         } catch {}
     }
 
     func saveConfig() async {
         guard !token.isEmpty else { return }
-        let cfg = AppConfig(autoShareCommunity: autoShareCommunity)
+        let cfg = AppConfig(autoShareCommunity: autoShareCommunity,
+                            noFollowups: followupsEnabled ? nil : true)
         guard let body = try? JSONEncoder().encode(cfg) else { return }
         var req = URLRequest(url: base.appending(path: "upload").appending(path: "CONFIG.json"))
         req.httpMethod = "PUT"
@@ -369,6 +373,17 @@ struct SettingsView: View {
         return hex.prefix(6).uppercased()
     }
 
+    /// 「不再追问」全局开关（设计稿 Interactions；关 = CONFIG.noFollowups=true）。
+    private var followupsBinding: Binding<Bool> {
+        Binding(
+            get: { store.followupsEnabled },
+            set: { newValue in
+                store.followupsEnabled = newValue
+                Task { await store.saveConfig() }
+            }
+        )
+    }
+
     private var autoShareBinding: Binding<Bool> {
         Binding(
             get: { store.autoShareCommunity },
@@ -443,6 +458,11 @@ struct SettingsView: View {
                             SettingsRow(tileBG: Theme.tileNeutral, symbol: "wand.and.stars", tileFG: Theme.secondary,
                                         title: "AI 指令", subtitle: "自定义长按菜单里的每个动作") { settingsChevron }
                         }.buttonStyle(.plain)
+                        settingsRowDivider
+                        SettingsRow(tileBG: Theme.tileNeutral, symbol: "questionmark.bubble", tileFG: Theme.secondary,
+                                    title: "成文后追问", subtitle: "AI 追问一两个细节，把文章补厚") {
+                            Toggle("", isOn: followupsBinding).labelsHidden().tint(Theme.accent)
+                        }
                     }
 
                     group("发布") {

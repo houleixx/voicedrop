@@ -133,6 +133,8 @@ struct PushToTalkBar: View {
     var agentReply: AgentReply? = nil
     /// 松开发送、真正 enqueue 之前触发的钩子（预留给未来库级场景，如发送前刷新态）。
     var onWillSend: (() -> Void)? = nil
+    /// pill 右侧的可选配件（追问星标按钮等）；nil 时保持原单按钮布局。
+    var trailing: AnyView? = nil
 
     // 上滑取消的手势态，完全是这条 bar 自己的 UI 细节，不需要外部知道。
     @State private var willCancel = false
@@ -148,8 +150,11 @@ struct PushToTalkBar: View {
                 VoiceFeedbackStack(transcript: recording ? dictation.transcript : nil,
                                    reply: agentReply, queue: session.queue, highlightLocators: highlightLocators)
             }
-            pill(recording: recording, working: working)
-                .shadow(color: .black.opacity(0.10), radius: 12, x: 0, y: 5)   // float over the body
+            HStack(spacing: 10) {
+                pill(recording: recording, working: working)
+                    .shadow(color: .black.opacity(0.10), radius: 12, x: 0, y: 5)   // float over the body
+                if let trailing { trailing }
+            }
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 10)

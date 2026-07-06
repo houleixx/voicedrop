@@ -36,6 +36,12 @@ struct RecordingDetailView: View {
     @State private var agentReply: AgentReply?
     @State private var agent = ArticleAgentSession()
     @State private var dictation = SpeechDictation()
+
+    // 追问：状态机 + 卡片自己的口述通道（独立于主说话条，两边互不串台）+
+    // 织入段落的临时荧光高亮（第N行）。
+    @State private var followup = FollowupState()
+    @State private var fuDictation = SpeechDictation()
+    @State private var highlightLine: Int?
     @State private var connected = false
     @State private var confirmDeleteFromDetail = false
     @State private var showingInsertPhoto = false
@@ -109,6 +115,7 @@ struct RecordingDetailView: View {
             restyling = true
             if let _ = await store.restyle(recording, styleV: v) {
                 doc = await store.fetchDoc(recording)
+                followup.load(doc)   // 重挖带来新一轮追问，整组换掉
                 articleIndex = 0
                 await loadVersionHistory()
             } else {
@@ -149,8 +156,17 @@ struct RecordingDetailView: View {
         .toolbar(.hidden, for: .navigationBar)
         .overlay(alignment: .bottom) {
             if !articles.isEmpty {
-                PushToTalkBar(dictation: dictation, session: agent, highlightLocators: true,
-                              articleIndex: { articleIndex }, agentReply: agentReply)
+                VStack(spacing: 10) {
+                    if followup.sheet == .expanded, !followup.questions(for: articleIndex).isEmpty {
+                        FollowupCard(state: followup, articleIndex: articleIndex, dictation: fuDictation,
+                                     onSubmit: { q, text in submitFollowupAnswer(q, text) },
+                                     onCollapse: { withAnimation(.easeInOut(duration: 0.3)) { followup.sheet = .collapsed } })
+                    }
+                    PushToTalkBar(dictation: dictation, session: agent, highlightLocators: true,
+                                  articleIndex: { articleIndex }, agentReply: agentReply,
+                                  trailing: followupStar)
+                }
+                .animation(.easeInOut(duration: 0.3), value: followup.sheet)
             }
         }
         .overlay(alignment: .bottom) { toastView }
@@ -172,6 +188,7 @@ struct RecordingDetailView: View {
                 emptyReason = await store.fetchEmptyReason(recording)
             } else {
                 doc = await store.fetchDoc(recording)
+                followup.load(doc)   // 有未答追问 → 卡片自动升起（设计① 成文后升起）
             }
             loadingDoc = false
             published = doc?.hasWechatDraft ?? false
@@ -183,7 +200,7 @@ struct RecordingDetailView: View {
                 sharedToCommunity = communityShareId != nil
             }
         }
-        .onDisappear { player.stop(); dictation.stop(); agent.disconnect() }
+        .onDisappear { player.stop(); dictation.stop(); fuDictation.stop(); agent.disconnect() }
         .sheet(isPresented: $showingWechatSettings, onDismiss: {
             if publishAfterSetup {
                 publishAfterSetup = false
@@ -208,6 +225,26 @@ struct RecordingDetailView: View {
         }
     }
 
+    /// 说话条右端的追问星标（3b）：收起且本篇还有未答题时出现；答完/跳完自动移除。
+    private var followupStar: AnyView? {
+        guard followup.sheet == .collapsed else { return nil }
+        let remaining = followup.pendingCount(for: articleIndex)
+        guard remaining > 0 else { return nil }
+        return AnyView(FollowupStarButton(remaining: remaining) {
+            withAnimation(.easeInOut(duration: 0.3)) { followup.sheet = .expanded }
+        })
+    }
+
+    /// 松开提交口述回答：指令带上问题原文交给现有编辑队列，收尾在 onUpdate。
+    private func submitFollowupAnswer(_ q: FollowupQuestion, _ text: String) {
+        guard let body = articles[safe: articleIndex]?.body else { return }
+        followup.beginAnswer(q, articleIndex: articleIndex, oldBody: body)
+        agent.enqueue(
+            "【回答追问】问题：「\(q.text)」我的口述回答：「\(text)」把回答里的信息织进正文最相关的段落——只用回答里出现的事实，不照抄问题本身、不动无关段落。",
+            articleIndex: articleIndex
+        )
+    }
+
     /// Open the editing socket + ask for mic/speech once the article is loaded.
     private func connectIfNeeded() async {
         guard !connected, !articles.isEmpty else { return }
@@ -216,6 +253,7 @@ struct RecordingDetailView: View {
             guard let newDoc else { return }
             doc = newDoc
             articleIndex = min(articleIndex, max(0, newDoc.resolvedArticles.count - 1))
+            followup.handleUpdated(newDoc)   // 追问回答的收尾（diff → 确认 → 翻题）
             // A new agent edit writes a new version; refresh history and reset to latest.
             Task { await loadVersionHistory() }
         }
@@ -223,11 +261,23 @@ struct RecordingDetailView: View {
             // The reply stays on screen until it's replaced by a newer one or the
             // user taps elsewhere on the page — no auto-dismiss timer.
             agentReply = AgentReply(text: text, ok: ok)
+            if !ok { followup.handleFailure() }
+        }
+        followup.patch = { [self] id, status in
+            Task { await store.patchQuestion(recording, id: id, status: status) }
+        }
+        followup.onHighlight = { [self] line in
+            withAnimation(.easeIn(duration: 0.3)) { highlightLine = line }
+            Task {
+                try? await Task.sleep(nanoseconds: 3_500_000_000)
+                withAnimation(.easeOut(duration: 0.8)) { highlightLine = nil }
+            }
         }
         agent.connect(recording)
         // 长按菜单配置：后台拉一次，失败静默（缓存/内置兜底，长按永远有菜单）。
         Task { await UIConfigStore.shared.refresh() }
         await dictation.requestAuth()
+        await fuDictation.requestAuth()
         await loadVersionHistory()
     }
 
@@ -257,7 +307,7 @@ struct RecordingDetailView: View {
         let patched = ArticleDoc(
             id: current.id, sourceAudio: current.sourceAudio, createdAt: current.createdAt,
             transcript: current.transcript, srt: current.srt,
-            articles: entry.articles, tags: current.tags,
+            articles: entry.articles, tags: current.tags, questions: current.questions,
             photos: current.photos, title: current.title, body: current.body
         )
         doc = patched
@@ -596,6 +646,10 @@ struct RecordingDetailView: View {
         // simultaneousGesture so it never blocks scrolling or text selection.
         .simultaneousGesture(TapGesture().onEnded {
             if agentReply != nil { agentReply = nil }
+            // 点击卡片外区域 = 收起追问卡（设计②），文章照常保存、追问静默保留。
+            if followup.sheet == .expanded {
+                withAnimation(.easeInOut(duration: 0.3)) { followup.sheet = .collapsed }
+            }
         })
     }
 
@@ -661,6 +715,9 @@ struct RecordingDetailView: View {
                         .font(.system(size: 16)).foregroundStyle(Theme.bodyRead)
                         .lineSpacing(9)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        // 追问回答刚织进的段落：荧光笔高亮几秒后淡出（3c）。
+                        .background(highlightLine == n ? Theme.fuHighlight : .clear,
+                                    in: RoundedRectangle(cornerRadius: 4))
                         .overlay {
                             GeometryReader { geo in
                                 Color.clear.contentShape(Rectangle())

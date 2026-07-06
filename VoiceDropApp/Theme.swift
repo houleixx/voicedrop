@@ -65,6 +65,16 @@ enum Theme {
     static let inkTile        = Color(hex: "2A2521")
     static let tileWarm       = Color(hex: "F6EFE3")   // waveform tile bg
 
+    // 追问（follow-up questions）— 琥珀身份色系，设计稿 design_handoff_follow_up_questions
+    static let fuCardBG       = Color(hex: "FAF7F1")   // 卡片底
+    static let fuBorder       = Color(hex: "E5DCCB")   // 卡片边框 / 未答进度段
+    static let fuHandle       = Color(hex: "DDD5C7")   // 拖动把手
+    static let fuAmber        = Color(hex: "D8A25B")   // 「追问 N/M」标签
+    static let fuStarStroke   = Color(hex: "B98A3E")   // 星标线条
+    static let fuStarBorder   = Color(hex: "EBD9B8")   // 星标按钮琥珀边框
+    static let fuGreen        = Color(hex: "5B8A63")   // 已答进度段 / 确认行
+    static let fuHighlight    = Color(hex: "D8A25B").opacity(0.28)   // 正文荧光笔
+
     // Radii
     enum R {
         static let card: CGFloat = 5

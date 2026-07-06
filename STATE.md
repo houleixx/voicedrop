@@ -1,6 +1,14 @@
 # VoiceDrop — project state (read this first)
 
-Last updated: 2026-07-04
+Last updated: 2026-07-07
+
+## 最近大改：追问（follow-up questions，2026-07-07 上线）
+
+成文后 AI 按篇追问 1–3 个「只有作者知道」的细节，作者按住说话回答，回答被织进正文。
+
+- **数据形态**：问题是 `articles/<stem>.json` **doc 顶层 sidecar** `questions:[{id,articleIndex,text,status,createdAt}]`——不进 body、不进 versions，发公众号/分享页/社区/小红书全出口天然不带（曾经的「正文尾——追问——节」方案已废弃，那会全渠道泄漏）。
+- **服务端**（jianshuo.dev repo）：MINE_SYSTEM 让模型在 JSON 里按篇给 `questions` 数组；`miner.js extractFollowups` 收进 doc 顶层（`parseArticles` 还会剥掉误写进正文的尾节兜底）；`PATCH /files/api/articles/<stem>/question` 改状态（元数据写，不铸版本，`article-store.setQuestionStatus`）；CONFIG.json `noFollowups:true` 关掉；重挖整组换新。**坑：Anthropic output_config schema 不支持数组 `maxItems`（线上 400）——上限只能靠 prompt+parse 截断。**
+- **iOS**：`FollowupQuestions.swift`（FollowupState 状态机 + 3a 底部逐题卡片 + 3b 说话条星标收起态 + 3c 绿勾确认行）；回答 = 卡片自己的 SpeechDictation → 现有 `/agent/edit` WS，指令带【回答追问】前缀（agent SYSTEM 认这个前缀做定点织入）；答完 diff 新旧正文找被补段落 → 确认行 + 正文荧光高亮（`highlightLine`）→ `patchQuestion`；7 天未答客户端过滤不再显示；设置 →「成文后追问」开关。设计稿：claude.ai/design 项目 `design_handoff_follow_up_questions/`（README 是完整规格）。
 
 ## What it is
 
