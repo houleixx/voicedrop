@@ -48,15 +48,14 @@ iOS 代码：`~/code/voicedrop/VoiceDropApp/`（RecordSession / AudioRecorder / 
 两个新端点，认证用现有用户 token（resolveScope）：
 
 1. **`POST /agent/realtime/session`** — mint 临时凭证
-   - 先查该用户算力余额；不足 → 402 拒绝（不接通）。
-   - 用 `env.OPENAI_API_KEY` 调 `POST /v1/realtime/client_secrets`，body 带：`model: "gpt-realtime-2.1"`、采访员 `instructions`（见 D）、`audio.input.format`/`audio.output.format`（pcm16 24kHz）、`audio.input.turn_detection: { type:"server_vad", silence_duration_ms:500, create_response:false, interrupt_response:false }`（只借它的 speech_started/stopped 事件，**不自动回应**）、`output_modalities:["audio"]`、`reasoning.effort:"low"`。
+   - **不硬性拦截余额**（用户定：算力可为负）。直接用 `env.OPENAI_API_KEY` 调 `POST /v1/realtime/client_secrets`，body 带：`model: "gpt-realtime-2.1"`、采访员 `instructions`（见 D）、`audio.input.format`/`audio.output.format`（pcm16 24kHz）、`audio.input.turn_detection: { type:"server_vad", silence_duration_ms:500, create_response:false, interrupt_response:false }`（只借它的 speech_started/stopped 事件，**不自动回应**）、`output_modalities:["audio"]`、`reasoning.effort:"low"`。
    - 回 `{ client_secret, expires_at, session_id }` 给 app。`OPENAI_API_KEY` 只在 worker。
 2. **`POST /agent/realtime/usage`** — 结算计费
-   - app 会话结束上报 `{ session_id, usage: {audio_in, audio_in_cached, audio_out, text_in, text_in_cached, text_out}, audio_seconds }`（token 数从 WS `response.done.usage` 累加）。
-   - worker 按费率 config 折算美元 → 折算算力（沿用 usage_store 的美元→算力换算，见既有计费 spec），扣费、记 ledger（来源标 `realtime`）。
-   - worker 端用 `audio_seconds × 每秒 audio-input token 估算`做**上限 sanity**，防 app 上报异常导致漏计/超计。
+   - app 会话结束上报 `{ session_id, usage: {audio_in, audio_in_cached, audio_out, text_in, text_in_cached, text_out} }`（token 数从 WS `response.done.usage` 累加）。
+   - worker 按费率折算美元 → 折算算力，**直接扣费**（沿用 usage_store，**允许扣成负数，不设下限**），记 ledger（来源标 `realtime`）。
+   - **计费不追求精确**（用户定）：直接信 app 上报的 token 数，不做 audio_seconds 上限兜底那类复杂 reconciliation。
 
-费率存 worker 侧 config（`config/realtime-pricing.json` 或常量），便于跟 OpenAI 官方更新，不改代码即可调。
+**换算口径（用户定 2026-07-07）**：`1 USD = 7.3 RMB`，再 `×23 算力/元` ⇒ **`1 USD ≈ 167.9 算力`**。常量 `USD_TO_SUANLI = 7.3 * 23`。费率($/1M token)存 worker 侧常量/config，便于跟 OpenAI 官方更新。
 
 ### C. App WS 客户端（iOS，Phase 2）—— `RealtimeInterviewer`
 - 向 `/agent/realtime/session` 取临时 secret → 连 `wss://api.openai.com/v1/realtime?model=gpt-realtime-2.1&client_secret=…`。
@@ -82,7 +81,7 @@ iOS 代码：`~/code/voicedrop/VoiceDropApp/`（RecordSession / AudioRecorder / 
 点隐蔽触发区
   → RecordSession 照常 recorder.start()（录音开始，神圣）
   → 同时 RealtimeInterviewer.start():
-       GET/POST /agent/realtime/session（worker 用 OPENAI_API_KEY mint 临时 secret，先验算力）
+       POST /agent/realtime/session（worker 用 OPENAI_API_KEY mint 临时 secret；不拦余额）
        连 WS → session.update
   → 音频 tap 每 buffer: (a) 写 .m4a  (b) 24kHz PCM16 → input_audio_buffer.append
   → 收 speech_stopped → app 起 5s 静音计时
@@ -95,15 +94,15 @@ iOS 代码：`~/code/voicedrop/VoiceDropApp/`（RecordSession / AudioRecorder / 
 
 ## 错误处理 / 降级（录音优先级最高）
 - realtime 任一环失败（无网、mint 失败、算力不足、WS 断、OpenAI 5xx、背压）：**只影响 AI**，录音写入与上传**完全不受影响**；UI 显示「AI 已断开（录音继续）」。
-- 算力不足：`/agent/realtime/session` 直接 402，app 不接通 AI，但**照常录音**（录音本身走原有算力流程/或本就免费录音，按现状）。
+- 算力不足：**不拦截**（用户定：可为负）。照常接通，结算时扣成负数，用户后续充值补上。录音永远照常。
 - 临时 secret 过期：app 在 `expires_at` 前重新 mint（长录音跨越 secret 有效期时重连，重连期间录音不受影响）。
 - app 崩溃/切后台：录音按现有 AVAudioSession 中断逻辑处理（`interruptionNotification` 现有路径保留）；realtime 断开即可。
 
 ## 计费细节
-- 单位换算：token 数 × 费率($/1M) = 美元；美元 → 算力沿用既有 usage_store 换算（与 ASR/挖矿同一套 23 算力=¥1 / 美元汇率口径，实现时对齐）。
-- 分档：audio_in / audio_in_cached / audio_out / text_in / text_in_cached / text_out 各自费率。
-- 来源：WS `response.done.usage`（`input_token_details.audio_tokens/text_tokens/cached_tokens`、`output_token_details.audio_tokens/text_tokens`）逐 response 累加。
-- **待实现时验证**：realtime 的 input-audio token 是否会因少创建 response 而漏报/在下次 response 汇总——实现时对着真实 usage 事件核实语义；worker 侧用 `audio_seconds` 做上限 sanity 兜底，防漏计。
+- 换算：`美元 = Σ(token 数 × 该档费率 / 1e6)`；`算力 = 美元 × USD_TO_SUANLI`，`USD_TO_SUANLI = 7.3 × 23 = 167.9`（1 USD = 7.3 RMB，23 算力/元）。
+- 分档费率($/1M)：audio_in **32** / audio_in_cached **0.40** / audio_out **64** / text_in **4** / text_in_cached **0.40** / text_out **24**。
+- 来源：WS `response.done.usage` 逐 response 累加（app 侧累加后一次上报）。
+- **不追求精确 + 允许负数**（用户定）：直接信上报值折算扣费，扣成负也不拦；不做 audio_seconds 兜底。
 - ledger 记来源 `realtime`，与挖矿/编辑/图片并列，用户在「设置→算力」看得到。
 
 ## 分期
@@ -130,6 +129,6 @@ voicedrop-agent worker：`/agent/realtime/session`（mint + 算力预检）、`/
 - 不做多语言/多音色切换（v1 定一个中文音色 + 中文 instructions）。
 - Phase 1 不依赖 Phase 2；后端可先上线自测。
 
-## 待用户复核的取舍
+## 已确认的取舍
 - AEC 会改变录音音色（已确认接受）。
-- 计费 reconciliation 的精确 token 语义留到实现时对真实 usage 事件核实（本 spec 给出 sanity 兜底策略）。
+- 计费不追求精确、算力可为负、mint 不拦余额（已确认，2026-07-07）。换算 1 USD = 7.3 RMB → ×23 算力。
