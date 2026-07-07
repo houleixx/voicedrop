@@ -41,6 +41,7 @@ struct StyleVersion: Identifiable, Decodable {
 @Observable
 final class SettingsStore {
     var style = ""
+    var name = ""                            // profile.name（CLAUDE.json），署名 + 挖文章称呼
     var styleVersions: [StyleVersion] = []   // oldest-first, from /style/history
     var styleHead = 0
     var serverStyles: [Int] = []   // profile.styles (多风格对比 selection) from GET /style
@@ -65,7 +66,7 @@ final class SettingsStore {
 
     // 文风存在 CLAUDE.json，单独走 /style（版本化）。
     private struct StylePayload: Encodable { let style: String }
-    private struct StyleResponse: Decodable { let style: String?; let styles: [Int]? }
+    private struct StyleResponse: Decodable { let style: String?; let name: String?; let styles: [Int]? }
 
     func load() async {
         guard !token.isEmpty else { error = "请先登录"; return }
@@ -80,6 +81,7 @@ final class SettingsStore {
             if (200..<300).contains(code) {
                 if let obj = try? JSONDecoder().decode(StyleResponse.self, from: data) {
                     style = obj.style ?? ""
+                    name = obj.name ?? ""
                     serverStyles = obj.styles ?? []
                 }
             } else if code != 404 {
@@ -133,6 +135,20 @@ final class SettingsStore {
             styleHead = head
             saved = true
         } catch { self.error = error.localizedDescription }
+    }
+
+    /// Persist the 名字 to profile.name (PUT /style {name}) — 署名 + 挖文章称呼。
+    /// Profile write, NOT a 文风 version (改名字不新增文风版本)。
+    func saveName(_ newName: String) async {
+        guard !token.isEmpty else { return }
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        var req = URLRequest(url: base.appending(path: "style"))
+        req.httpMethod = "PUT"
+        req.setBearer(token)
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let body = (try? JSONEncoder().encode(["name": trimmed])) ?? Data()
+        _ = try? await URLSession.shared.upload(for: req, from: body)
+        name = trimmed
     }
 
     /// Persist the 多风格对比 selection to profile.styles (PUT /style {styles}) — the
@@ -191,10 +207,8 @@ final class SettingsStore {
     }
 
     var autoShareCommunity = false
-    /// 成文后追问（默认开）。服务端挖矿读 CONFIG.noFollowups 决定是否附追问。
-    var followupsEnabled = true
 
-    private struct AppConfig: Codable { var autoShareCommunity: Bool?; var noFollowups: Bool? }
+    private struct AppConfig: Codable { var autoShareCommunity: Bool? }
 
     func loadConfig() async {
         guard !token.isEmpty else { return }
@@ -207,14 +221,12 @@ final class SettingsStore {
             guard (200..<300).contains(code) else { return }
             guard let cfg = try? JSONDecoder().decode(AppConfig.self, from: data) else { return }
             autoShareCommunity = cfg.autoShareCommunity ?? false
-            followupsEnabled = !(cfg.noFollowups ?? false)
         } catch {}
     }
 
     func saveConfig() async {
         guard !token.isEmpty else { return }
-        let cfg = AppConfig(autoShareCommunity: autoShareCommunity,
-                            noFollowups: followupsEnabled ? nil : true)
+        let cfg = AppConfig(autoShareCommunity: autoShareCommunity)
         guard let body = try? JSONEncoder().encode(cfg) else { return }
         var req = URLRequest(url: base.appending(path: "upload").appending(path: "CONFIG.json"))
         req.httpMethod = "PUT"
@@ -361,27 +373,14 @@ struct SettingsView: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var store = SettingsStore()
-    @State private var prefs = Prefs.shared
     @State private var showWechat = false
     @State private var showStyle = false
-    @State private var showingExport = false
-    @State private var exportManager = ExportManager()
+    @State private var showName = false
 
     private var shortTag: String {
         let id = AuthStore.shared.anonId          // "anon-7f3a…"
         let hex = id.hasPrefix("anon-") ? String(id.dropFirst(5)) : id
         return hex.prefix(6).uppercased()
-    }
-
-    /// 「不再追问」全局开关（设计稿 Interactions；关 = CONFIG.noFollowups=true）。
-    private var followupsBinding: Binding<Bool> {
-        Binding(
-            get: { store.followupsEnabled },
-            set: { newValue in
-                store.followupsEnabled = newValue
-                Task { await store.saveConfig() }
-            }
-        )
     }
 
     private var autoShareBinding: Binding<Bool> {
@@ -420,7 +419,7 @@ struct SettingsView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
-                    // 账户 + 写作风格 — 同一张卡，连在一起
+                    // 账户 · 算力 — 顶张卡
                     SettingsCard {
                         NavigationLink { AccountView() } label: {
                             SettingsRow(tileBG: Theme.inkTile, symbol: "checkmark.shield.fill", tileFG: .white,
@@ -448,20 +447,32 @@ struct SettingsView: View {
                                 }
                             }
                         }.buttonStyle(.plain)
-                        settingsRowDivider
-                        Button { showStyle = true } label: {
-                            SettingsRow(tileBG: Theme.tileNeutral, symbol: "pencil", tileFG: Theme.secondary,
-                                        title: "写作风格", subtitle: "成文时模仿这套语气") { settingsChevron }
-                        }.buttonStyle(.plain)
-                        settingsRowDivider
-                        NavigationLink { InstructionSettingsView() } label: {
-                            SettingsRow(tileBG: Theme.tileNeutral, symbol: "wand.and.stars", tileFG: Theme.secondary,
-                                        title: "AI 指令", subtitle: "自定义长按菜单里的每个动作") { settingsChevron }
-                        }.buttonStyle(.plain)
-                        settingsRowDivider
-                        SettingsRow(tileBG: Theme.tileNeutral, symbol: "questionmark.bubble", tileFG: Theme.secondary,
-                                    title: "成文后追问", subtitle: "AI 追问一两个细节，把文章补厚") {
-                            Toggle("", isOn: followupsBinding).labelsHidden().tint(Theme.accent)
+                    }
+
+                    // 写作 — 名字（新）· 写作风格（含成文后追问）· AI 指令
+                    group("写作") {
+                        SettingsCard {
+                            Button { showName = true } label: {
+                                SettingsRow(tileBG: Theme.tileNeutral, symbol: "person.text.rectangle", tileFG: Theme.secondary,
+                                            title: "名字", subtitle: "署名和挖文章时对你的称呼") {
+                                    HStack(spacing: 8) {
+                                        Text(store.name.isEmpty ? "未设置" : store.name)
+                                            .font(.system(size: 15)).foregroundStyle(store.name.isEmpty ? Theme.faint : Theme.ink)
+                                            .lineLimit(1)
+                                        settingsChevron
+                                    }
+                                }
+                            }.buttonStyle(.plain)
+                            settingsRowDivider
+                            Button { showStyle = true } label: {
+                                SettingsRow(tileBG: Theme.tileNeutral, symbol: "pencil", tileFG: Theme.secondary,
+                                            title: "写作风格", subtitle: "成文时模仿这套语气") { settingsChevron }
+                            }.buttonStyle(.plain)
+                            settingsRowDivider
+                            NavigationLink { InstructionSettingsView() } label: {
+                                SettingsRow(tileBG: Theme.tileNeutral, symbol: "wand.and.stars", tileFG: Theme.secondary,
+                                            title: "AI 指令", subtitle: "自定义长按菜单里的每个动作") { settingsChevron }
+                            }.buttonStyle(.plain)
                         }
                     }
 
@@ -481,32 +492,16 @@ struct SettingsView: View {
                         }
                     }
 
-                    group("同步与存储") {
-                        SettingsCard {
-                            SettingsRow(tileBG: Theme.tileNeutral, symbol: "icloud", tileFG: Theme.secondary,
-                                        title: "备份到 iCloud", subtitle: "云端留底，换机不丢") {
-                                Toggle("", isOn: Binding(get: { prefs.iCloudBackup }, set: { prefs.iCloudBackup = $0 }))
-                                    .labelsHidden().tint(Theme.accent)
-                            }
-                            settingsRowDivider
-                            Button { showingExport = true } label: {
-                                SettingsRow(tileBG: Theme.tileNeutral, symbol: "square.and.arrow.down",
-                                            tileFG: Theme.secondary, title: "导出数据",
-                                            subtitle: "所有录音和文章打包下载") { settingsChevron }
-                            }.buttonStyle(.plain)
-                        }
-                    }
-
                     group("其他") {
                         SettingsCard {
-                            NavigationLink { AboutView() } label: {
-                                SettingsRow(tileBG: Theme.tileNeutral, symbol: "info.circle", tileFG: Theme.secondary,
-                                            title: "关于") { settingsChevron }
+                            NavigationLink { DataBackupView(libraryStore: libraryStore) } label: {
+                                SettingsRow(tileBG: Theme.tileNeutral, symbol: "externaldrive", tileFG: Theme.secondary,
+                                            title: "数据与备份", subtitle: "iCloud 备份 · 导出数据") { settingsChevron }
                             }
                             settingsRowDivider
-                            SettingsRow(tileBG: Theme.tileNeutral, symbol: "number", tileFG: Theme.secondary,
-                                        title: "版本") {
-                                Text(Prefs.versionBuild).font(.system(size: 14)).foregroundStyle(Theme.faint)
+                            NavigationLink { AboutView() } label: {
+                                SettingsRow(tileBG: Theme.tileNeutral, symbol: "info.circle", tileFG: Theme.secondary,
+                                            title: "关于", subtitle: "隐私 · 公约 · 联系 · 版本 \(Prefs.versionBuild)") { settingsChevron }
                             }
                         }
                     }
@@ -519,11 +514,7 @@ struct SettingsView: View {
         .task { await store.load(); await store.loadWechat(); await store.loadConfig(); await store.loadBalance() }
         .sheet(isPresented: $showWechat) { WechatSettingsSheet(store: store) }
         .sheet(isPresented: $showStyle) { WritingStyleSheet(store: store) }
-        .sheet(isPresented: $showingExport, onDismiss: { exportManager.reset() }) {
-            ExportSheet(manager: exportManager, recordings: libraryStore.recordings, store: libraryStore)
-                .presentationDetents([.medium])
-                .presentationDragIndicator(.hidden)
-        }
+        .sheet(isPresented: $showName) { NameEditSheet(store: store) }
     }
 
     @ViewBuilder private func group<C: View>(_ label: String, @ViewBuilder _ content: () -> C) -> some View {
@@ -541,6 +532,114 @@ struct SettingsView: View {
             }
         } else {
             Text("未配置").font(.system(size: 12.5)).foregroundStyle(Theme.faint)
+        }
+    }
+}
+
+// MARK: - 名字编辑 sheet（设计稿 1c）— 1a 点「名字」行升起的轻量半高 sheet
+
+/// 单输入框 + 一句说明 + 20 字上限。取消放弃、完成写进 profile.name（CLAUDE.json，
+/// 不新增文风版本）。和文风 sheet 交互一致：取消 / 完成 清晰。
+struct NameEditSheet: View {
+    @Bindable var store: SettingsStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var draft: String
+    @FocusState private var focused: Bool
+
+    private static let maxLen = 20
+
+    init(store: SettingsStore) {
+        self.store = store
+        _draft = State(initialValue: store.name)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // 头部：取消 / 名字 / 完成
+            HStack {
+                Button("取消") { dismiss() }
+                    .font(.system(size: 16)).foregroundStyle(Theme.secondary)
+                Spacer()
+                Text("名字").font(.system(size: 17, weight: .semibold)).foregroundStyle(Theme.ink)
+                Spacer()
+                Button("完成") {
+                    let v = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+                    Task { await store.saveName(v) }
+                    dismiss()
+                }
+                .font(.system(size: 16, weight: .bold)).foregroundStyle(Theme.accent)
+            }
+            .padding(.horizontal, 20).padding(.top, 18).padding(.bottom, 12)
+
+            // 输入框 + 字数
+            HStack(spacing: 2) {
+                TextField("你的名字", text: $draft)
+                    .font(.system(size: 17)).foregroundStyle(Theme.ink)
+                    .focused($focused)
+                    .submitLabel(.done)
+                    .onSubmit {
+                        Task { await store.saveName(draft.trimmingCharacters(in: .whitespacesAndNewlines)) }
+                        dismiss()
+                    }
+                    .onChange(of: draft) { _, v in
+                        if v.count > Self.maxLen { draft = String(v.prefix(Self.maxLen)) }
+                    }
+                Text("\(draft.count)/\(Self.maxLen)").font(.system(size: 13)).foregroundStyle(Theme.faint)
+            }
+            .padding(.vertical, 14).padding(.horizontal, 15)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.R.primary))
+            .overlay(RoundedRectangle(cornerRadius: Theme.R.primary).stroke(Theme.accent, lineWidth: 1.5))
+            .padding(.horizontal, 20)
+
+            Text("这个名字会出现在文章署名，以及挖文章时对你的称呼。随时可改。")
+                .font(.system(size: 13)).foregroundStyle(Theme.secondary).lineSpacing(3)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 20).padding(.top, 12)
+
+            Spacer(minLength: 0)
+        }
+        .background(Theme.appBG.ignoresSafeArea())
+        .presentationDetents([.height(230)])
+        .presentationDragIndicator(.visible)
+        .onAppear { focused = true }
+    }
+}
+
+// MARK: - 数据与备份（设计稿 2a）— iCloud 备份 + 导出，收进一个入口
+
+/// 原「同步与存储」两行（iCloud 备份开关 + 导出数据）合成一页，从设置「其他」进。
+struct DataBackupView: View {
+    let libraryStore: LibraryStore
+    @State private var prefs = Prefs.shared
+    @State private var showingExport = false
+    @State private var exportManager = ExportManager()
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                SettingsCard {
+                    SettingsRow(tileBG: Theme.tileNeutral, symbol: "icloud", tileFG: Theme.secondary,
+                                title: "备份到 iCloud", subtitle: "云端留底，换机不丢") {
+                        Toggle("", isOn: Binding(get: { prefs.iCloudBackup }, set: { prefs.iCloudBackup = $0 }))
+                            .labelsHidden().tint(Theme.accent)
+                    }
+                    settingsRowDivider
+                    Button { showingExport = true } label: {
+                        SettingsRow(tileBG: Theme.tileNeutral, symbol: "square.and.arrow.down",
+                                    tileFG: Theme.secondary, title: "导出数据",
+                                    subtitle: "所有录音和文章打包下载") { settingsChevron }
+                    }.buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 40)
+        }
+        .background(Theme.appBG.ignoresSafeArea())
+        .navigationTitle("数据与备份")
+        .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showingExport, onDismiss: { exportManager.reset() }) {
+            ExportSheet(manager: exportManager, recordings: libraryStore.recordings, store: libraryStore)
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.hidden)
         }
     }
 }
