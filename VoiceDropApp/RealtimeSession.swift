@@ -25,8 +25,6 @@ final class RealtimeSession {
     var onStateChange: ((State) -> Void)?
 
     private(set) var state: State = .idle { didSet { if state != oldValue { onStateChange?(state) } } }
-    private(set) var speechEvents = 0    // diagnostics: speech_started/stopped received
-    private(set) var audioDeltas = 0     // diagnostics: AI audio chunks received
 
     private var task: URLSessionWebSocketTask?
     private var urlSession: URLSession?
@@ -39,18 +37,12 @@ final class RealtimeSession {
     private var generation = 0
 
     func connect() {
-        EngineRecorder.trace("session.connect(): BEGIN (task==nil? \(task == nil))")
-        guard task == nil else { EngineRecorder.trace("session.connect(): SKIP already connected"); return }
+        guard task == nil else { return }
         generation += 1
         closed = false
-        // Per-segment diagnostics: each toggle-on starts fresh, so debugLine reflects
-        // THIS segment's health instead of accumulating across segments.
-        speechEvents = 0
-        audioDeltas = 0
         state = .connecting
         let token = AuthStore.shared.bearer
-        guard !token.isEmpty, let url = URL(string: "\(API.agentWS)/realtime/relay") else { EngineRecorder.trace("session.connect(): DEGRADED no token/url"); state = .degraded; return }
-        EngineRecorder.trace("session.connect(): opening WS \(url.absoluteString)")
+        guard !token.isEmpty, let url = URL(string: "\(API.agentWS)/realtime/relay") else { state = .degraded; return }
         var req = URLRequest(url: url)
         req.setBearer(token)                                  // handshake header, same as StatusSession
         let s = URLSession(configuration: .default)
@@ -85,12 +77,11 @@ final class RealtimeSession {
         guard let obj = (try? JSONSerialization.jsonObject(with: Data(str.utf8))) as? [String: Any],
               let type = obj["type"] as? String else { return }
         switch type {
-        case "input_audio_buffer.speech_started": speechEvents += 1; onSpeechStarted?()
-        case "input_audio_buffer.speech_stopped": speechEvents += 1; onSpeechStopped?()
+        case "input_audio_buffer.speech_started": onSpeechStarted?()
+        case "input_audio_buffer.speech_stopped": onSpeechStopped?()
         case "response.created":
             onResponseCreated?()
         case "response.output_audio.delta":
-            audioDeltas += 1
             if let b64 = obj["delta"] as? String, let d = Data(base64Encoded: b64) { onAudioDelta?(d) }
         case "response.done":
             onResponseDone?()

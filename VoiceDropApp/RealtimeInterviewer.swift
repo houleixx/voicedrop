@@ -33,12 +33,6 @@ final class RealtimeInterviewer: RecordingBackend {
     private(set) var interviewActive = false
     private(set) var connState: RealtimeSession.State = .idle
 
-    /// One-line diagnostics for the on-screen overlay (shown while interviewing).
-    var debugLine: String {
-        "tap \(engine.tapBuffers) · WS \(connState.rawValue) · 语音 \(session.speechEvents) · AI音 \(session.audioDeltas)"
-            + (engine.engineError.map { " · ⚠️\($0)" } ?? "")
-    }
-
     // Half-duplex state — see class comment.
     private var aiSpeaking = false
     private var aiTurnEnded = false          // OpenAI finished GENERATING (response.done)
@@ -62,9 +56,7 @@ final class RealtimeInterviewer: RecordingBackend {
     /// toggles it with the 采访 button. Throws only if recording can't start.
     func start() throws {
         wireCallbacks()
-        EngineRecorder.trace("interviewer.start(): engine.start() BEGIN (recording only, no relay)")
         try engine.start()
-        EngineRecorder.trace("interviewer.start(): engine.start() END — recording live")
     }
 
     /// 采访 button: toggle the AI side-path. Recording is never touched.
@@ -74,7 +66,6 @@ final class RealtimeInterviewer: RecordingBackend {
 
     private func startInterview() {
         guard engine.isRecording else { return }
-        EngineRecorder.trace("interviewer.startInterview(): connecting relay")
         interviewActive = true
         aiSpeaking = false
         aiTurnEnded = false
@@ -83,7 +74,6 @@ final class RealtimeInterviewer: RecordingBackend {
     }
 
     private func stopInterview() {
-        EngineRecorder.trace("interviewer.stopInterview(): disconnecting relay (recording continues)")
         interviewActive = false
         engine.teeEnabled = false // Sink stops the resample/tee — plain recording pays nothing
         resumeTask?.cancel(); resumeTask = nil

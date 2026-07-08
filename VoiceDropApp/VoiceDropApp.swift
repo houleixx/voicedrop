@@ -4,8 +4,6 @@ import SwiftUI
 struct VoiceDropApp: App {
     @StateObject private var router = AppRouter.shared   // shared so App Intents (开始录音) can reach it
 
-    init() { EngineRecorder.trace("########## APP COLD LAUNCH (process start) ##########") }
-
     var body: some Scene {
         WindowGroup {
             RootView()

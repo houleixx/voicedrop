@@ -29,8 +29,8 @@ import os
 /// input un-pulled (tap 0). The mic tap uses the input node's NATIVE format (format: nil).
 ///
 /// The tap runs on a realtime audio thread (NOT main actor): file write + conversion
-/// live in a `@unchecked Sendable` `Sink`. Level/tap-count cross to the UI via a lock
-/// + the existing 100 ms tick (no per-buffer main-actor hops).
+/// live in a `@unchecked Sendable` `Sink`. The mic level crosses to the UI via a
+/// lock + the existing 100 ms tick (no per-buffer main-actor hops).
 @MainActor
 @Observable
 final class EngineRecorder: RecordingBackend {
@@ -43,8 +43,6 @@ final class EngineRecorder: RecordingBackend {
     private(set) var startDate: Date?
     var onInterrupted: ((AudioRecorder.Recording) -> Void)?
 
-    // On-screen diagnostics — turns "doesn't work" into data.
-    private(set) var tapBuffers = 0        // mic buffers that reached the tap (0 = tap dead)
     private(set) var engineError: String?  // any capture/file error (surfaced in RecordSession)
 
     /// Mic PCM teed for the AI uplink: mono Int16 little-endian @ 24 kHz. Only fires
@@ -102,18 +100,13 @@ final class EngineRecorder: RecordingBackend {
     static func prewarm() async {
         guard !warmed else { return }
         warmed = true
-        let t0 = Date()
         let s = AVAudioSession.sharedInstance()
         try? s.setCategory(.playAndRecord, mode: .default, options: [.duckOthers, .defaultToSpeaker])
         try? s.setActive(true)
-        log.info("prewarm: session active +\(Date().timeIntervalSince(t0), format: .fixed(precision: 3))s")
         try? await Task.sleep(for: .milliseconds(150))
-        log.info("prewarm: done +\(Date().timeIntervalSince(t0), format: .fixed(precision: 3))s")
     }
 
     func start() throws {
-        // Reset diagnostics FIRST so a playback-start failure below stays visible.
-        tapBuffers = 0
         engineError = nil
 
         var tapInstalled = false
@@ -123,7 +116,6 @@ final class EngineRecorder: RecordingBackend {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playAndRecord, mode: .default, options: [.duckOthers, .defaultToSpeaker])
             try session.setActive(true)
-            EngineRecorder.log.info("start: session active +\(Date().timeIntervalSince(tStart), format: .fixed(precision: 3))s")
 
             let now = Date()
             let url = AudioRecorder.stagingURL(start: now)
@@ -148,9 +140,7 @@ final class EngineRecorder: RecordingBackend {
             input.installTap(onBus: 0, bufferSize: 4096, format: nil, block: s.makeTapBlock())
             tapInstalled = true
             captureEngine.prepare()
-            let tEng = Date()
             try captureEngine.start()
-            EngineRecorder.log.info("start: captureEngine.start() took \(Date().timeIntervalSince(tEng), format: .fixed(precision: 3))s (total +\(Date().timeIntervalSince(tStart), format: .fixed(precision: 3))s)")
             captureStarted = true
 
             // PLAYBACK engine — started LAZILY on the first AI audio (see playAI).
@@ -160,7 +150,6 @@ final class EngineRecorder: RecordingBackend {
             isRecording = true
             elapsed = 0
             startTicking()
-            EngineRecorder.log.info("start: RECORDING (total +\(Date().timeIntervalSince(tStart), format: .fixed(precision: 3))s)")
         } catch {
             EngineRecorder.log.error("start: THREW +\(Date().timeIntervalSince(tStart), format: .fixed(precision: 3))s: \(error.localizedDescription, privacy: .public)")
             // Transactional rollback so the graph/session is clean for the next attempt.
@@ -295,12 +284,9 @@ final class EngineRecorder: RecordingBackend {
                 try? await Task.sleep(for: .milliseconds(100))
                 guard let self else { return }
                 self.elapsed = Date().timeIntervalSince(start)
-                // Level/tap-count are produced on the audio thread and published here —
-                // one read per 100 ms instead of two main-actor hops per buffer.
-                if let snap = self.sink?.snapshot() {
-                    self.level = snap.level
-                    self.tapBuffers = snap.taps
-                }
+                // Level is produced on the audio thread and published here —
+                // one read per 100 ms instead of a main-actor hop per buffer.
+                if let s = self.sink { self.level = s.latestLevel }
             }
         }
     }
@@ -325,14 +311,13 @@ final class EngineRecorder: RecordingBackend {
         private let lock = NSLock()
         private var _teeEnabled = false
         private var _level: Double = 0
-        private var _taps = 0
         var teeEnabled: Bool {
             get { lock.lock(); defer { lock.unlock() }; return _teeEnabled }
             set { lock.lock(); _teeEnabled = newValue; lock.unlock() }
         }
-        func snapshot() -> (taps: Int, level: Double) {
+        var latestLevel: Double {
             lock.lock(); defer { lock.unlock() }
-            return (_taps, _level)
+            return _level
         }
 
         /// Creates the AAC file EAGERLY at the target speech-tuned format
@@ -353,7 +338,6 @@ final class EngineRecorder: RecordingBackend {
                 guard let self else { return }
                 let teeOn: Bool
                 self.lock.lock()
-                self._taps += 1
                 self._level = EngineRecorder.rms(buffer)
                 teeOn = self._teeEnabled
                 self.lock.unlock()

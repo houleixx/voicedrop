@@ -65,11 +65,9 @@ struct RecordSession: View {
             }
         }
         .task {
-            EngineRecorder.trace("========== RecordSession.task BEGIN classic=\(classic) ==========")
             let onInt: (AudioRecorder.Recording) -> Void = { take in Task { await promote(take); onFinish() } }
             if classic { recorder.onInterrupted = onInt } else { interviewer.onInterrupted = onInt }
             let granted = await AudioRecorder.ensurePermission()
-            EngineRecorder.trace("task: ensurePermission END granted=\(granted)")
             guard granted else { phase = .denied; return }
             // Pre-warm the audio route so the FIRST cold start isn't laggy (第一次卡顿):
             // session activation + settle happens behind the spinner.
@@ -82,9 +80,8 @@ struct RecordSession: View {
                 if classic { try recorder.start(); sessionStart = recorder.startDate }
                 else { try interviewer.start(); sessionStart = interviewer.startDate }
                 phase = .recording
-                EngineRecorder.trace("task: phase=.recording SET")
             }
-            catch { EngineRecorder.trace("task: CATCH \(error.localizedDescription)"); phase = .failed("无法开始录音：\(error.localizedDescription)") }
+            catch { phase = .failed("无法开始录音：\(error.localizedDescription)") }
         }
         .onDisappear {
             // Safety net: any teardown path that didn't run stop() (a future dismissal
@@ -122,10 +119,6 @@ struct RecordSession: View {
                 }
                 if interviewer.interviewActive {
                     Text(interviewStatusText).font(.system(size: 11)).tracking(1).foregroundStyle(Theme.faint)
-                    // Diagnostic line — read these values to me if AI 采访 misbehaves.
-                    Text(interviewer.debugLine)
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(Theme.faint).padding(.top, 2)
                 }
                 // Engine faults must be visible in EVERY take, not only while interviewing —
                 // the engine backend records all plain memos now, and a silent capture

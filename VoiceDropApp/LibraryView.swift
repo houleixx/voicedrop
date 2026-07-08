@@ -177,8 +177,6 @@ struct LibraryView: View {
                 recordLaunch = nil
                 Task { await refresh() }
             }
-            .onAppear { EngineRecorder.trace("COVER onAppear → RecordSession shown") }
-            .onDisappear { EngineRecorder.trace("COVER onDisappear") }
         }
         .task {
             statusSession.onPhase = { stem, phase in store.markPhase(stem: stem, phase: phase) }
@@ -562,7 +560,7 @@ struct LibraryView: View {
             redCircle
                 .scaleEffect(talking ? 1.08 : 1)
                 .gesture(talkGesture)
-                .simultaneousGesture(TapGesture().onEnded { if !talking { EngineRecorder.trace("TAP 红键 → launch record"); recordLaunch = RecordLaunch(tag: nil) } })
+                .simultaneousGesture(TapGesture().onEnded { if !talking { recordLaunch = RecordLaunch(tag: nil) } })
             Text(talking ? (willCancel ? "上滑取消 · 松开放弃" : "松开发送 · 上滑取消") : "轻点录音 · 长按说话")
                 .font(.system(size: 12)).tracking(1)
                 .foregroundStyle(talking ? Theme.accent : Theme.secondary)
