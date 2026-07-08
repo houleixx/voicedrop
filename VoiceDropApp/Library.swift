@@ -298,10 +298,47 @@ final class LibraryStore {
 
     private let base = API.filesBase
     private var token: String { AuthStore.shared.bearer }
-    private var titleCache: [String: String] = [:]   // articleKey -> first article title
-    private var coverCache: [String: String] = [:]   // articleKey -> first-photo rel key ("" = article has none)
-    private var tagsCache: [String: [String]] = [:]  // articleKey -> doc tags ([] = article has none)
+    // Article meta caches (articleKey → title / first-photo key ("" = none) / tags).
+    // DISK-BACKED: purely in-memory dicts meant every cold launch refetched the doc of
+    // EVERY processed recording — ~180 concurrent GETs that blew the QUIC 100-stream
+    // limit and hung the main thread for seconds at startup (the "HTTP 风暴"). Loaded
+    // from Caches once at init; persisted (small JSON, few KB) after every mutation.
+    // Stale entries for stems no longer listed are harmless — they're never read.
+    private var titleCache: [String: String]
+    private var coverCache: [String: String]
+    private var tagsCache: [String: [String]]
     private var processingPhase: [String: MiningPhase] = [:]   // stem -> current mining phase (WebSocket)
+
+    private struct ArticleMetaCache: Codable {
+        var titles: [String: String] = [:]
+        var covers: [String: String] = [:]
+        var tags: [String: [String]] = [:]
+    }
+    private nonisolated static var metaCacheURL: URL {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appending(path: "article-meta-cache.json")
+    }
+
+    init() {
+        let loaded = (try? Data(contentsOf: Self.metaCacheURL)).flatMap {
+            try? JSONDecoder().decode(ArticleMetaCache.self, from: $0)
+        } ?? ArticleMetaCache()
+        titleCache = loaded.titles
+        coverCache = loaded.covers
+        tagsCache = loaded.tags
+    }
+
+    /// Persist the meta caches (fire-and-forget, off the main actor). Called after
+    /// batch fills and after invalidations — a lost write just means a refetch.
+    private func persistMetaCache() {
+        let snapshot = ArticleMetaCache(titles: titleCache, covers: coverCache, tags: tagsCache)
+        let url = Self.metaCacheURL
+        Task.detached(priority: .utility) {
+            if let data = try? JSONEncoder().encode(snapshot) {
+                try? data.write(to: url, options: .atomic)
+            }
+        }
+    }
 
     private struct ListResponse: Decodable {
         struct Item: Decodable { let name: String; let uploaded: String? }
@@ -421,25 +458,37 @@ final class LibraryStore {
     }
 
     /// For every 已成文 recording without a cached title, fetch its doc and grab
-    /// the first article's title (concurrently). Matched back by id so a delete
-    /// mid-fetch can't mis-assign.
+    /// the first article's title. Matched back by id so a delete mid-fetch can't
+    /// mis-assign. CONCURRENCY IS BOUNDED (sliding window): the disk cache makes the
+    /// steady-state pending set 0–2, but on a cold cache (first install, Caches
+    /// purged) this used to fire one unbounded GET per processed recording — ~180
+    /// concurrent requests that saturated the QUIC stream limit and hung startup.
     private func fetchMissingTitles() async {
         let pending = recordings.filter { $0.hasArticles && $0.articleTitle == nil }
         guard !pending.isEmpty else { return }
         // One doc fetch fills BOTH the title and the first-photo cover icon.
         // cover "" = the article has no photo (cache it so we don't refetch).
         let found = await withTaskGroup(of: (String, String, String, [String]).self) { group -> [(String, String, String, [String])] in
-            for rec in pending {
+            let maxConcurrent = 5
+            var iterator = pending.makeIterator()
+            func addNext() -> Bool {
+                guard let rec = iterator.next() else { return false }
                 group.addTask {
                     guard let doc = await self.fetchDoc(rec), let art = doc.resolvedArticles.first else { return (rec.id, "", "", []) }
                     let cover = ArticleBody.firstPhotoKey(in: art.body, photos: doc.photos ?? []) ?? ""
                     return (rec.id, art.title, cover, doc.tags ?? [])
                 }
+                return true
             }
+            for _ in 0..<maxConcurrent { guard addNext() else { break } }
             var out: [(String, String, String, [String])] = []
-            for await t in group where !t.1.isEmpty { out.append(t) }
+            for await t in group {
+                if !t.1.isEmpty { out.append(t) }
+                _ = addNext()                       // refill the window as results land
+            }
             return out
         }
+        guard !found.isEmpty else { return }
         for (id, title, cover, tags) in found {
             if let idx = recordings.firstIndex(where: { $0.id == id }) {
                 recordings[idx].articleTitle = title
@@ -450,6 +499,7 @@ final class LibraryStore {
                 tagsCache[recordings[idx].articleKey] = tags
             }
         }
+        persistMetaCache()
     }
 
     /// Voice-command completion: the server's `updated` push names exactly which
@@ -460,6 +510,7 @@ final class LibraryStore {
             let key = Recording.articleKey(forStem: stem)
             titleCache[key] = nil; coverCache[key] = nil; tagsCache[key] = nil
         }
+        persistMetaCache()
     }
 
     private func downloadURL(_ relName: String) -> URL {
@@ -547,6 +598,7 @@ final class LibraryStore {
         titleCache[rec.articleKey] = nil   // re-mined article may have a new title
         coverCache[rec.articleKey] = nil   // …and a different (or no) first photo
         tagsCache[rec.articleKey] = nil    // …and tags travel with the doc
+        persistMetaCache()
         await dispatchMine()               // trigger a fresh mine cycle now
         await load()
         return true
