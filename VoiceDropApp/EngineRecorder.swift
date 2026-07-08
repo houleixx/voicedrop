@@ -39,6 +39,10 @@ final class EngineRecorder: RecordingBackend {
     // SINGLE engine (VPIO requires input+output coupled).
     private let engine = AVAudioEngine()
     private let player = AVAudioPlayerNode()
+    // Muted mixer that routes the mic into the render graph so the graph actively PULLS
+    // the input node → the tap fires. Without this, VPIO's input side is never pulled
+    // (the AI player is silent), so tap delivers 0 buffers. outputVolume 0 = no feedback.
+    private let micSink = AVAudioMixerNode()
     private var sink: Sink?
     private var currentURL: URL?
     private var startInstant: Date?
@@ -84,8 +88,17 @@ final class EngineRecorder: RecordingBackend {
         s.onError = { [weak self] msg in Task { @MainActor in self?.engineError = msg }; EngineRecorder.log.error("sink: \(msg, privacy: .public)") }
         sink = s; currentURL = url; startInstant = now
 
+        // AI playback path.
         engine.attach(player)
         engine.connect(player, to: engine.mainMixerNode, format: EngineRecorder.aiFormat)
+        // Mic PULL path: input → micSink(vol 0) → mainMixer. This makes the render graph
+        // actively pull the input node so the tap fires (the fix for tap 0 under VPIO).
+        engine.attach(micSink)
+        engine.connect(input, to: micSink, format: post)
+        micSink.outputVolume = 0
+        engine.connect(micSink, to: engine.mainMixerNode, format: post)
+        log.info("micSink wired (input→micSink[0]→mainMixer)")
+
         input.removeTap(onBus: 0)
         input.installTap(onBus: 0, bufferSize: 4096, format: nil, block: s.makeTapBlock())
         log.info("tap installed (format:nil)")
