@@ -59,6 +59,7 @@ final class EngineRecorder: RecordingBackend {
     private var currentURL: URL?
     private var startInstant: Date?
     private var tickTask: Task<Void, Never>?
+    private var watchdogTask: Task<Void, Never>?   // recovers the cold-start "first entry" miss
 
     init() {
         NotificationCenter.default.addObserver(
@@ -115,6 +116,7 @@ final class EngineRecorder: RecordingBackend {
             isRecording = true
             elapsed = 0
             startTicking()
+            startCaptureWatchdog()   // fix "first entry stuck": recover a cold-start with no buffers
         } catch {
             // Transactional rollback so the graph/session is clean for the next attempt.
             if tapInstalled { captureEngine.inputNode.removeTap(onBus: 0) }
@@ -137,6 +139,7 @@ final class EngineRecorder: RecordingBackend {
         player.stop()
         if playbackEngine.isRunning { playbackEngine.stop() }
         playbackStarted = false
+        watchdogTask?.cancel(); watchdogTask = nil
         sink = nil                    // release/close the file
         stopTicking()
         isRecording = false
@@ -187,6 +190,24 @@ final class EngineRecorder: RecordingBackend {
         }
     }
     private func stopTicking() { tickTask?.cancel(); tickTask = nil }
+
+    // The very first cold start after launch sometimes brings up the input route too late,
+    // so the capture engine delivers ZERO buffers ("first entry stuck"). If no buffer has
+    // arrived shortly after start, re-tap and restart the capture engine once — by then the
+    // session/route has settled. No buffers yet ⇒ the lazy file isn't open, so this is clean.
+    private func startCaptureWatchdog() {
+        watchdogTask?.cancel()
+        watchdogTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(600))
+            guard let self, self.isRecording, self.tapBuffers == 0, let s = self.sink else { return }
+            let input = self.captureEngine.inputNode
+            input.removeTap(onBus: 0)
+            if self.captureEngine.isRunning { self.captureEngine.stop() }
+            input.installTap(onBus: 0, bufferSize: 4096, format: nil, block: s.makeTapBlock())
+            self.captureEngine.prepare()
+            try? self.captureEngine.start()
+        }
+    }
 
     // MARK: - Audio-thread sink (owns the file; @unchecked Sendable like VolcAudioStreamer)
 
