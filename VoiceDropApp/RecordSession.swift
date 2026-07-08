@@ -62,6 +62,10 @@ struct RecordSession: View {
             if realtime { interviewer.onInterrupted = onInt } else { recorder.onInterrupted = onInt }
             let granted = await AudioRecorder.ensurePermission()
             guard granted else { phase = .denied; return }
+            // Pre-warm the audio route so the FIRST cold start isn't laggy (第一次卡顿).
+            // Activating the session + a short settle happens here while the spinner shows,
+            // so interviewer.start()'s engine start hits a warm route.
+            if realtime { await EngineRecorder.prewarm() }
             location.start()
             // Use the backend's OWN start instant as the session id, so the photo
             // folder key matches the audio filename to the second (don't take a

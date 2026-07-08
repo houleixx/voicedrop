@@ -68,6 +68,17 @@ final class EngineRecorder: RecordingBackend {
 
     static func ensurePermission() async -> Bool { await AudioRecorder.ensurePermission() }
 
+    /// Warm the audio route BEFORE the first capture start so the cold-start lag
+    /// ("第一次卡顿") happens here (while the spinner shows) instead of freezing the
+    /// recording UI. Activating `.playAndRecord` spins up the input HW; a short settle
+    /// lets the route come up, so the subsequent `engine.start()` is fast. Idempotent.
+    static func prewarm() async {
+        let s = AVAudioSession.sharedInstance()
+        try? s.setCategory(.playAndRecord, mode: .default, options: [.duckOthers, .defaultToSpeaker])
+        try? s.setActive(true)
+        try? await Task.sleep(for: .milliseconds(150))
+    }
+
     func start() throws {
         // Reset diagnostics FIRST so a playback-start failure below stays visible
         // (previously a trailing `engineError = nil` wiped it — real bug).
