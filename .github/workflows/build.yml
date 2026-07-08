@@ -58,9 +58,12 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
-      # PRs: build only (verify it compiles, no signing)
+      # PRs + 不带 [tf] 的普通 push：build only（验证编译，不签名不上传）。
+      # 2026-07-09 起 TestFlight 上传改为 OPT-IN：苹果对每 app 有 ~20 个/24h 的
+      # 上传限额，之前「每 push 必发」在高强度迭代日把限额烧光（409）。想发版：
+      # commit message 带 [tf]，或手动 workflow_dispatch（destination=testflight）。
       - name: Build for verification
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || (github.event_name == 'push' && !contains(github.event.head_commit.message, '[tf]'))
         run: |
           xcodebuild build \
             -project VoiceDrop.xcodeproj \
@@ -72,7 +75,7 @@ jobs:
       # (reuses the build already on TestFlight; metadata + screenshots come from
       # fastlane/metadata + fastlane/screenshots).
       - name: Run fastlane
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[tf]'))
         env:
           MATCH_PASSWORD:       ${{ secrets.MATCH_PASSWORD }}
           MATCH_GIT_BASIC_AUTH: ${{ secrets.MATCH_GIT_BASIC_AUTH }}
@@ -89,5 +92,5 @@ jobs:
           fi
 
       - name: Push tags
-        if: success() && github.event_name != 'pull_request'
+        if: success() && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[tf]')))
         run: git push --tags || true
