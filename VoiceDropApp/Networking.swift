@@ -38,8 +38,9 @@ enum API {
     static let recoBase  = URL(string: "https://\(host)/reco")!        // Reco worker (ranking, engagement)
     static let agentWS   = "wss://\(host)/agent"                        // WebSocket base: append /edit, /status, /asr (+ query)
     static let agentLink = URL(string: "https://\(host)/agent/link")!  // DeviceLink REST (start / verify / …)
-    /// Public share / community page for a share id.
-    static func sharePage(_ id: String) -> URL { URL(string: "https://\(host)/voicedrop/\(id)")! }
+    /// Public share / community page for a share id. 分享页走 voicedrop.cn
+    ///（.cn 域名，微信内打开不弹提示）；app 的 API 仍走 jianshuo.dev。
+    static func sharePage(_ id: String) -> URL { URL(string: "https://voicedrop.cn/\(id)")! }
 }
 
 /// Cross-process bridge between the VoiceDrop app and its Share Extension. The
