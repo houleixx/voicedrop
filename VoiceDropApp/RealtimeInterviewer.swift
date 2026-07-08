@@ -39,6 +39,11 @@ final class RealtimeInterviewer: RecordingBackend {
     private var resumeTask: Task<Void, Never>?
     private var muteWatchdog: Task<Void, Never>?
 
+    // Auto-reconnect: 跨境弱网（北京→Cloudflare）下 relay WS 会掉线;掉线不该等于
+    // 整段采访报废——指数退避静默重连（1/2/4…s,最多 6 次）,连回即恢复。录音不受影响。
+    private var reconnectTask: Task<Void, Never>?
+    private var reconnectAttempt = 0
+
     var onInterrupted: ((AudioRecorder.Recording) -> Void)? {
         get { engine.onInterrupted }
         set {
@@ -76,6 +81,8 @@ final class RealtimeInterviewer: RecordingBackend {
     private func stopInterview() {
         interviewActive = false
         engine.teeEnabled = false // Sink stops the resample/tee — plain recording pays nothing
+        reconnectTask?.cancel(); reconnectTask = nil
+        reconnectAttempt = 0
         resumeTask?.cancel(); resumeTask = nil
         muteWatchdog?.cancel(); muteWatchdog = nil
         aiSpeaking = false
@@ -84,8 +91,32 @@ final class RealtimeInterviewer: RecordingBackend {
         session.disconnect()      // worker settles this segment's billing on close
     }
 
+    /// Silent exponential-backoff reconnect while the interview is toggled on.
+    /// Gives up after 6 attempts (~1 min) and leaves the degraded badge — the user
+    /// can still toggle off/on manually, and the recording was never touched.
+    private func scheduleReconnect() {
+        guard interviewActive, reconnectTask == nil, reconnectAttempt < 6 else { return }
+        let delay = Double(1 << reconnectAttempt)          // 1,2,4,8,16,32s
+        reconnectAttempt += 1
+        reconnectTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(delay))
+            guard let self, !Task.isCancelled else { return }
+            self.reconnectTask = nil
+            guard self.interviewActive, self.connState == .degraded else { return }
+            // Fresh half-duplex slate: any in-flight AI turn died with the old socket.
+            self.aiSpeaking = false
+            self.aiTurnEnded = false
+            self.session.disconnect()
+            self.session.connect()
+        }
+    }
+
     private func wireCallbacks() {
-        session.onStateChange     = { [weak self] s in self?.connState = s }
+        session.onStateChange     = { [weak self] s in
+            self?.connState = s
+            if s == .live { self?.reconnectAttempt = 0 }
+            if s == .degraded { self?.scheduleReconnect() }
+        }
         session.onResponseCreated = { [weak self] in self?.beginAiTurn() }             // AI about to speak
         session.onAudioDelta      = { [weak self] pcm in
             guard let self, self.interviewActive else { return }   // toggle-off: drop late audio

@@ -8,7 +8,7 @@ import os
 /// valid AAC mono `recording-<ts>.m4a` at the user's 录音质量 setting (标准 16 kHz /
 /// 32 kbps · 高 24 kHz / 64 kbps — same contract as `Prefs.recorderSettings`), so
 /// promote/upload/ASR downstream is unchanged. Additionally:
-///   • can tee the mic PCM (mono Int16 @ 24 kHz, via a persistent AVAudioConverter)
+///   • can tee the mic audio (G.711 μ-law @ 8 kHz, via a persistent AVAudioConverter)
 ///     to `onPCM` for the AI 采访员 uplink — gated by `teeEnabled`, zero cost when off,
 ///   • plays AI audio via a separate playback engine's `AVAudioPlayerNode`.
 ///
@@ -45,8 +45,9 @@ final class EngineRecorder: RecordingBackend {
 
     private(set) var engineError: String?  // any capture/file error (surfaced in RecordSession)
 
-    /// Mic PCM teed for the AI uplink: mono Int16 little-endian @ 24 kHz. Only fires
-    /// while `teeEnabled` — a plain recording pays nothing for the AI side-path.
+    /// Mic audio teed for the AI uplink: G.711 μ-law bytes @ 8 kHz (matches the
+    /// relay's `audio/pcmu` input format — ~85kbps sustained, survives 跨境弱网).
+    /// Only fires while `teeEnabled` — a plain recording pays nothing for the side-path.
     var onPCM: ((Data) -> Void)?
     /// The AI interview side-path switch. Flipped by RealtimeInterviewer on toggle;
     /// when false the Sink skips the resample/convert + Data alloc entirely.
@@ -301,8 +302,11 @@ final class EngineRecorder: RecordingBackend {
         private let file: AVAudioFile
         private var fileConverter: AVAudioConverter?
         private var teeConverter: AVAudioConverter?
+        // AI 上行走 G.711 μ-law @ 8 kHz（1 字节/样本）：把持续上行从 ~600kbps 压到
+        // ~85kbps——北京→Cloudflare 的跨境链路扛不住 24k PCM16，几秒就断。先经持久
+        // converter 转 8k Int16，再逐样本 μ-law 编码。下行 AI 声音仍是 24k PCM。
         private let teeFormat = AVAudioFormat(commonFormat: .pcmFormatInt16,
-                                              sampleRate: EngineRecorder.aiRate, channels: 1, interleaved: true)!
+                                              sampleRate: 8_000, channels: 1, interleaved: true)!
         private var reportedWriteError = false
         var onTee: (@Sendable (Data) -> Void)?
         var onError: (@Sendable (String) -> Void)?
@@ -342,7 +346,7 @@ final class EngineRecorder: RecordingBackend {
                 teeOn = self._teeEnabled
                 self.lock.unlock()
                 self.write(buffer)                                   // SACRED: file first
-                if teeOn, let pcm = self.teeInt16(buffer), !pcm.isEmpty {
+                if teeOn, let pcm = self.teeULaw(buffer), !pcm.isEmpty {
                     self.onTee?(pcm)                                 // best-effort AI tee
                 }
             }
@@ -363,14 +367,32 @@ final class EngineRecorder: RecordingBackend {
             catch { reportOnce("写文件失败: \(error.localizedDescription)") }
         }
 
-        /// Persistent-converter AI tee: mono Int16 LE @ 24 kHz regardless of route.
-        private func teeInt16(_ buffer: AVAudioPCMBuffer) -> Data? {
+        /// Persistent-converter AI tee: G.711 μ-law bytes @ 8 kHz regardless of route.
+        private func teeULaw(_ buffer: AVAudioPCMBuffer) -> Data? {
             if teeConverter == nil || teeConverter!.inputFormat != buffer.format {
                 teeConverter = AVAudioConverter(from: buffer.format, to: teeFormat)
             }
             guard let conv = teeConverter, let out = Sink.convert(buffer, with: conv),
                   out.frameLength > 0, let ch = out.int16ChannelData else { return nil }
-            return Data(bytes: ch[0], count: Int(out.frameLength) * MemoryLayout<Int16>.size)
+            let n = Int(out.frameLength)
+            var bytes = [UInt8](repeating: 0, count: n)
+            for i in 0..<n { bytes[i] = Sink.muLaw(ch[0][i]) }
+            return Data(bytes)
+        }
+
+        /// Linear PCM16 → G.711 μ-law (standard ITU-T encode, bias 0x84, clip 32635).
+        private static func muLaw(_ sample: Int16) -> UInt8 {
+            let bias: Int32 = 0x84, clip: Int32 = 32635
+            var s = Int32(sample)
+            let sign: Int32 = s < 0 ? 0x80 : 0
+            if s < 0 { s = -s }
+            if s > clip { s = clip }
+            s += bias
+            var exponent: Int32 = 7
+            var mask: Int32 = 0x4000
+            while exponent > 0 && (s & mask) == 0 { exponent -= 1; mask >>= 1 }
+            let mantissa = (s >> (exponent + 3)) & 0x0F
+            return UInt8(truncatingIfNeeded: ~(sign | (exponent << 4) | mantissa))
         }
 
         private func reportOnce(_ msg: String) {
