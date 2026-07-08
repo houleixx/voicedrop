@@ -40,6 +40,19 @@ final class PushRegistrar: NSObject, UIApplicationDelegate, UNUserNotificationCe
         completionHandler([.banner, .sound])
     }
 
+    /// Tap on a notification: the payload carries a `link` deep link
+    /// (voicedrop://article/<stem> for「文章已生成」) — route straight to the
+    /// article instead of dumping the user on the list.
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                            didReceive response: UNNotificationResponse,
+                                            withCompletionHandler completionHandler: @escaping () -> Void) {
+        let info = response.notification.request.content.userInfo
+        if let link = info["link"] as? String, let url = URL(string: link) {
+            Task { @MainActor in AppRouter.shared.handle(url) }
+        }
+        completionHandler()
+    }
+
     @MainActor
     private static func upload(token: String) async {
         let bearer = AuthStore.shared.bearer
