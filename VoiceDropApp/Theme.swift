@@ -161,6 +161,10 @@ final class Prefs {
     var iCloudBackup: Bool { didSet { d.set(iCloudBackup, forKey: "pref.iCloudBackup") } }
     var deleteLocalAfterUpload: Bool { didSet { d.set(deleteLocalAfterUpload, forKey: "pref.deleteLocal") } }
     var highQuality: Bool { didSet { d.set(highQuality, forKey: "pref.highQuality") } }
+    /// 逃生门：录音统一切到 AVAudioEngine 后端（支持随时开 AI 采访旁路）后，
+    /// 万一 engine 路径在某些设备/路由上出问题，打开此开关回到久经考验的
+    /// AVAudioRecorder 经典路径（无 AI 采访）。稳定一两个版本后可删。
+    var classicRecorder: Bool { didSet { d.set(classicRecorder, forKey: "pref.classicRecorder") } }
 
     // 多风格对比：multiStyle = 开关（本地 UI）；styles = 选中的文风版本号（最多 3 个，
     // 同步进 profile.styles 供 miner 读）。
@@ -171,6 +175,7 @@ final class Prefs {
         iCloudBackup = d.object(forKey: "pref.iCloudBackup") as? Bool ?? true
         deleteLocalAfterUpload = d.object(forKey: "pref.deleteLocal") as? Bool ?? true
         highQuality = d.object(forKey: "pref.highQuality") as? Bool ?? false
+        classicRecorder = d.object(forKey: "pref.classicRecorder") as? Bool ?? false
         multiStyle = d.object(forKey: "pref.multiStyle") as? Bool ?? false
         styles = (d.array(forKey: "pref.styles") as? [Int]) ?? []
     }

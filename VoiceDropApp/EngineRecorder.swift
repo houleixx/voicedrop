@@ -77,6 +77,15 @@ final class EngineRecorder: RecordingBackend {
         NotificationCenter.default.addObserver(
             self, selector: #selector(handleInterruption(_:)),
             name: AVAudioSession.interruptionNotification, object: nil)
+        // Now that the engine backend records EVERY take (not just AI mode), it must
+        // survive route changes (AirPods in/out, CarPlay…) the way AVAudioRecorder did
+        // natively. AVAudioEngine stops itself when the audio configuration changes;
+        // this observer restarts capture so the recording keeps rolling. The tap stays
+        // installed across the restart; the file keeps its original format (a mid-take
+        // sample-rate change may surface as engineError — visible, not silent).
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(handleConfigChange(_:)),
+            name: .AVAudioEngineConfigurationChange, object: captureEngine)
     }
 
     static func ensurePermission() async -> Bool { await AudioRecorder.ensurePermission() }
@@ -210,6 +219,15 @@ final class EngineRecorder: RecordingBackend {
         if !player.isPlaying { player.play() }
     }
 
+    /// Stop AI playback immediately (toggle-off mid-speech): clears every scheduled
+    /// buffer and resets the drain counter so the half-duplex gate can reopen at once.
+    /// Capture (the sacred recording) is untouched.
+    func stopAIPlayback() {
+        player.stop()
+        pendingPlayback = 0
+        onPlaybackDrained?()
+    }
+
     // MARK: - Interruption / ticking (mirror AudioRecorder)
 
     @objc private nonisolated func handleInterruption(_ note: Notification) {
@@ -217,6 +235,21 @@ final class EngineRecorder: RecordingBackend {
               let raw = info[AVAudioSessionInterruptionTypeKey] as? UInt,
               AVAudioSession.InterruptionType(rawValue: raw) == .began else { return }
         Task { @MainActor in if let take = self.stop() { self.onInterrupted?(take) } }
+    }
+
+    /// Route/config changed mid-recording (headphones plugged, Bluetooth switch…):
+    /// AVAudioEngine stops; restart capture so the take keeps rolling.
+    @objc private nonisolated func handleConfigChange(_ note: Notification) {
+        Task { @MainActor in
+            guard self.isRecording, !self.captureEngine.isRunning else { return }
+            EngineRecorder.trace("configChange: capture engine stopped mid-take → restarting")
+            self.captureEngine.prepare()
+            do { try self.captureEngine.start(); EngineRecorder.trace("configChange: capture restarted OK") }
+            catch {
+                self.engineError = "路由切换后录音引擎重启失败: \(error.localizedDescription)"
+                EngineRecorder.trace("configChange: restart FAILED \(error.localizedDescription)")
+            }
+        }
     }
 
     private func startTicking() {

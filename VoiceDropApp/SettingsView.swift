@@ -629,6 +629,15 @@ struct DataBackupView: View {
                                     tileFG: Theme.secondary, title: "导出数据",
                                     subtitle: "所有录音和文章打包下载") { settingsChevron }
                     }.buttonStyle(.plain)
+                    settingsRowDivider
+                    // 逃生门：录音已统一到 AVAudioEngine 后端（支持录音中随时开 AI 采访）。
+                    // 万一新引擎在某些设备/耳机路由上异常，打开此项回到经典 AVAudioRecorder
+                    // 路径（录音界面不再显示「采访」键）。稳定一两个版本后此行会删除。
+                    SettingsRow(tileBG: Theme.tileNeutral, symbol: "mic.badge.xmark", tileFG: Theme.secondary,
+                                title: "经典录音引擎", subtitle: "录音异常时打开（关闭 AI 采访）") {
+                        Toggle("", isOn: Binding(get: { prefs.classicRecorder }, set: { prefs.classicRecorder = $0 }))
+                            .labelsHidden().tint(Theme.accent)
+                    }
                 }
             }
             .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 40)

@@ -4,22 +4,26 @@ import AVFoundation
 /// Full-screen recording takeover (方案二): launched from the red record key on
 /// the 我的录音 list. Starts recording on appear → big stopwatch + live waveform
 /// → stop. On stop it promotes the take into the upload queue and closes
-/// immediately — the *list* shows it as 正在上传 and does the upload. No separate
-/// uploading screen.
+/// immediately — the *list* shows it as 正在上传 and does the upload.
+///
+/// BACKEND (2026-07-08): every recording uses the AVAudioEngine backend (via
+/// `RealtimeInterviewer`) so the AI 采访员 can be toggled ON MID-RECORDING with the
+/// 采访 key left of 停止 (mirroring 拍照 on the right). The m4a is written from the
+/// tap unconditionally — the interview is a pure side-path and can never touch it.
+/// Escape hatch: 设置 → 数据与备份 → 经典录音引擎 switches back to the battle-tested
+/// AVAudioRecorder path (no 采访 key) in case the engine misbehaves on some device.
 struct RecordSession: View {
     /// When launched from a tag tab: the article mined from this take should
     /// default-carry that tag. Written as a local sidecar at promote time and
     /// uploaded with the take (survives offline queueing / app restarts).
     var defaultTag: String? = nil
-    /// When true, this session records with the AVAudioEngine backend AND connects
-    /// the realtime AI 采访员 from t=0 (launched via the hidden trigger on the list).
-    /// Chosen at start, never switched mid-recording — recording is never interrupted.
-    var realtime: Bool = false
     /// Dismiss back to the list (after stop, or cancel).
     var onFinish: () -> Void
 
     enum Phase: Equatable { case starting, denied, recording, failed(String) }
 
+    /// Escape hatch (Prefs.classicRecorder): true = old AVAudioRecorder path.
+    private let classic = Prefs.shared.classicRecorder
     @State private var recorder = AudioRecorder()
     @State private var interviewer = RealtimeInterviewer()
     @State private var location = LocationTagger()
@@ -32,12 +36,12 @@ struct RecordSession: View {
     // Live UI state from whichever backend is active this session.
     // Read the engine's observed props DIRECTLY (not through a computed passthrough)
     // so SwiftUI reliably tracks the nested @Observable and the stopwatch updates.
-    private var activeElapsed: TimeInterval { realtime ? interviewer.engine.elapsed : recorder.elapsed }
-    private var activeLevel: Double { realtime ? interviewer.engine.level : recorder.level }
-    private var realtimeStatusText: String {
+    private var activeElapsed: TimeInterval { classic ? recorder.elapsed : interviewer.engine.elapsed }
+    private var activeLevel: Double { classic ? recorder.level : interviewer.engine.level }
+    private var interviewStatusText: String {
         switch interviewer.connState {
         case .connecting: return "AI 连接中…"
-        case .live: return "AI 已接通"
+        case .live: return "AI 采访中 · 再点一下结束"
         case .degraded: return "AI 已断开 · 录音继续"
         case .idle: return ""
         }
@@ -58,32 +62,28 @@ struct RecordSession: View {
             }
         }
         .task {
-            EngineRecorder.trace("========== RecordSession.task BEGIN realtime=\(realtime) ==========")
+            EngineRecorder.trace("========== RecordSession.task BEGIN classic=\(classic) ==========")
             let onInt: (AudioRecorder.Recording) -> Void = { take in Task { await promote(take); onFinish() } }
-            if realtime { interviewer.onInterrupted = onInt } else { recorder.onInterrupted = onInt }
-            EngineRecorder.trace("task: ensurePermission BEGIN (perm=\(AVAudioApplication.shared.recordPermission.rawValue))")
+            if classic { recorder.onInterrupted = onInt } else { interviewer.onInterrupted = onInt }
             let granted = await AudioRecorder.ensurePermission()
             EngineRecorder.trace("task: ensurePermission END granted=\(granted)")
-            guard granted else { EngineRecorder.trace("task: permission DENIED"); phase = .denied; return }
-            // Pre-warm the audio route so the FIRST cold start isn't laggy (第一次卡顿).
-            // Activating the session + a short settle happens here while the spinner shows,
-            // so interviewer.start()'s engine start hits a warm route.
-            if realtime { EngineRecorder.trace("task: prewarm BEGIN"); await EngineRecorder.prewarm(); EngineRecorder.trace("task: prewarm END") }
+            guard granted else { phase = .denied; return }
+            // Pre-warm the audio route so the FIRST cold start isn't laggy (第一次卡顿):
+            // session activation + settle happens behind the spinner.
+            if !classic { await EngineRecorder.prewarm() }
             location.start()
-            EngineRecorder.trace("task: location.start() done → entering do{} start")
             // Use the backend's OWN start instant as the session id, so the photo
             // folder key matches the audio filename to the second (don't take a
             // separate Date() — it drifts across a second boundary).
             do {
-                if realtime { EngineRecorder.trace("task: interviewer.start() BEGIN"); try interviewer.start(); sessionStart = interviewer.engine.startDate; EngineRecorder.trace("task: interviewer.start() END") }
-                else { EngineRecorder.trace("task: recorder.start() BEGIN"); try recorder.start(); sessionStart = recorder.startDate; EngineRecorder.trace("task: recorder.start() END") }
+                if classic { try recorder.start(); sessionStart = recorder.startDate }
+                else { try interviewer.start(); sessionStart = interviewer.engine.startDate }
                 phase = .recording
-                EngineRecorder.trace("task: phase=.recording SET (UI should now show recording)")
+                EngineRecorder.trace("task: phase=.recording SET")
             }
             catch { EngineRecorder.trace("task: CATCH \(error.localizedDescription)"); phase = .failed("无法开始录音：\(error.localizedDescription)") }
         }
-        .onAppear { EngineRecorder.trace("RecordSession.onAppear realtime=\(realtime) phase=\(String(describing: phase))") }
-        .onDisappear { EngineRecorder.trace("RecordSession.onDisappear"); if realtime { _ = interviewer.stop() } else { _ = recorder.stop() } }
+        .onDisappear { if classic { _ = recorder.stop() } else { _ = interviewer.stop() } }
         .fullScreenCover(isPresented: $showCamera) {
             // The camera stays open for continuous shooting; shots collect in a
             // filmstrip (deletable) and are all uploaded when the user taps 完成.
@@ -107,10 +107,11 @@ struct RecordSession: View {
             VStack(spacing: 6) {
                 HStack(spacing: 8) {
                     Circle().fill(Theme.recordRed).frame(width: 9, height: 9)
-                    Text(realtime ? "AI 采访中" : "正在录音").font(.system(size: 14)).tracking(2).foregroundStyle(Theme.secondary)
+                    Text(interviewer.interviewActive ? "AI 采访中" : "正在录音")
+                        .font(.system(size: 14)).tracking(2).foregroundStyle(Theme.secondary)
                 }
-                if realtime {
-                    Text(realtimeStatusText).font(.system(size: 11)).tracking(1).foregroundStyle(Theme.faint)
+                if interviewer.interviewActive {
+                    Text(interviewStatusText).font(.system(size: 11)).tracking(1).foregroundStyle(Theme.faint)
                     // Diagnostic line — read these values to me if AI 采访 misbehaves.
                     Text(interviewer.debugLine)
                         .font(.system(size: 10, design: .monospaced))
@@ -137,12 +138,9 @@ struct RecordSession: View {
                         .shadow(color: .black.opacity(0.06), radius: 7, x: 0, y: 4)
                 }
                 .buttonStyle(.plain).accessibilityLabel("停止")
-                // Faint 拍照 trigger (handoff_recording_camera/README): a very subtle
-                // camera icon in the blank area to the right of the 停止 key, at the
-                // horizontal midpoint of that area (≈75% of screen width). No container —
-                // just a thin #A89E8E icon @0.45 with a 「拍照」label below. Overlaid on the
-                // 停止 circle so its center aligns to the circle's center and the 停止 key
-                // stays整屏居中, never shifting. Camera uses AVCaptureSession (video-only)
+                // Faint 拍照 trigger: a very subtle camera icon in the blank area to the
+                // right of the 停止 key (≈75% of screen width). Overlaid on the 停止 circle
+                // so the 停止 key stays整屏居中. Camera uses AVCaptureSession (video-only)
                 // so recording is not interrupted.
                 .overlay(alignment: .center) {
                     Image(systemName: "camera")
@@ -161,6 +159,30 @@ struct RecordSession: View {
                         }
                         .accessibilityLabel("拍照")
                         .offset(x: 98)   // 右侧空白区水平中点 ≈ 屏宽 75%（中线右移 25%）
+                }
+                // 采访 toggle — mirrors 拍照 on the LEFT of the 停止 key. Tap to connect the
+                // AI interviewer mid-recording; tap again to end it. Recording is a pure
+                // main-path and is never interrupted by any of this. Hidden on the classic
+                // (escape-hatch) backend, which can't tee PCM.
+                .overlay(alignment: .center) {
+                    if !classic {
+                        Image(systemName: "waveform.and.mic")
+                            .font(.system(size: 24, weight: .light))
+                            .foregroundStyle(interviewer.interviewActive ? Theme.accent : Color(hex: "A89E8E"))
+                            .opacity(interviewer.interviewActive ? 1.0 : 0.45)
+                            .frame(width: 42, height: 42)
+                            .contentShape(Rectangle())
+                            .onTapGesture { interviewer.toggleInterview() }
+                            .overlay(alignment: .top) {
+                                Text("采访")
+                                    .font(.system(size: 11)).tracking(2)
+                                    .foregroundStyle(interviewer.interviewActive ? Theme.accent : Color(hex: "C2B8A8"))
+                                    .fixedSize()
+                                    .offset(y: 42)
+                            }
+                            .accessibilityLabel(interviewer.interviewActive ? "结束采访" : "开始采访")
+                            .offset(x: -98)   // 左侧空白区水平中点，与右侧拍照对称
+                    }
                 }
                 Text("点击停止").font(.system(size: 12)).tracking(1).foregroundStyle(Theme.secondary)
             }
@@ -206,7 +228,7 @@ struct RecordSession: View {
     // MARK: Flow
 
     private func stop() async {
-        let take = realtime ? interviewer.stop() : recorder.stop()
+        let take = classic ? recorder.stop() : interviewer.stop()
         guard let take else { onFinish(); return }
         await promote(take)
         onFinish()                    // close — the list shows 正在上传 and uploads

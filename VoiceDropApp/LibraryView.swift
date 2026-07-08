@@ -16,15 +16,14 @@ struct LibraryView: View {
     @State private var tab: HomeTab = .recordings
     @State private var confirmDelete: Recording?
     @State private var confirmReprocess: Recording?
-    // A pending record launch. Item-based (NOT a Bool + a separate flag) so the mode
-    // travels WITH the presentation: fullScreenCover(item:) always builds the sheet
-    // from the item that triggered it. The old isPresented: + separate recordRealtime
-    // @State read STALE on the first present — the first "AI 采访" tap silently launched
-    // a non-realtime recording, then worked the second time. See RecordLaunch.
+    // A pending record launch. Item-based so parameters travel WITH the presentation:
+    // fullScreenCover(item:) always builds the sheet from the item that triggered it
+    // (isPresented: + separate @State flags read STALE on the first present — real bug).
+    // The AI 采访员 is no longer chosen here: it's a toggle INSIDE the recording screen
+    // (采访 key left of 停止), so the only launch parameter left is the tag.
     @State private var recordLaunch: RecordLaunch?
     private struct RecordLaunch: Identifiable {
         let id = UUID()
-        let realtime: Bool      // true = AI 采访员 (engine backend + relay); false = plain recording
         let tag: String?        // deep-link/intent tag; nil = use the current page's tag
     }
     @State private var showSettings = false
@@ -174,11 +173,11 @@ struct LibraryView: View {
         }
         .navigationDestination(isPresented: $showSettings) { SettingsView(libraryStore: store) }
         .fullScreenCover(item: $recordLaunch) { launch in
-            RecordSession(defaultTag: launch.tag ?? currentPageTag, realtime: launch.realtime) {
+            RecordSession(defaultTag: launch.tag ?? currentPageTag) {
                 recordLaunch = nil
                 Task { await refresh() }
             }
-            .onAppear { EngineRecorder.trace("COVER onAppear → RecordSession shown, realtime=\(launch.realtime)") }
+            .onAppear { EngineRecorder.trace("COVER onAppear → RecordSession shown") }
             .onDisappear { EngineRecorder.trace("COVER onDisappear") }
         }
         .task {
@@ -235,7 +234,7 @@ struct LibraryView: View {
                 // A deep-link/intent tag beats the current page's tag; nil keeps
                 // page behavior (record on a tag page → that page's tag).
                 selectedRec = nil; selectedPost = nil; showSettings = false
-                recordLaunch = RecordLaunch(realtime: false, tag: tag)
+                recordLaunch = RecordLaunch(tag: tag)
             case .article(let stem):
                 tab = .recordings; selectedPost = nil; showSettings = false
                 if let rec = store.recordings.first(where: { $0.stem == stem }) {
@@ -555,23 +554,7 @@ struct LibraryView: View {
             redCircle
                 .scaleEffect(talking ? 1.08 : 1)
                 .gesture(talkGesture)
-                .simultaneousGesture(TapGesture().onEnded { if !talking { EngineRecorder.trace("TAP 红键(普通录音) → launch realtime=false"); recordLaunch = RecordLaunch(realtime: false, tag: nil) } })
-                // Hidden AI 采访 trigger, left of the red key (mirrors RecordSession's 拍照 on the right):
-                // a faint icon; tap = record WITH the realtime interviewer (engine backend from t=0).
-                .overlay(alignment: .center) {
-                    Image(systemName: "waveform.and.mic")
-                        .font(.system(size: 22, weight: .light))
-                        .foregroundStyle(Color(hex: "A89E8E")).opacity(0.45)
-                        .frame(width: 42, height: 42)
-                        .contentShape(Rectangle())
-                        .onTapGesture { if !talking { EngineRecorder.trace("TAP AI采访键 → launch realtime=true"); recordLaunch = RecordLaunch(realtime: true, tag: nil) } }
-                        .overlay(alignment: .top) {
-                            Text("AI 采访").font(.system(size: 11)).tracking(2)
-                                .foregroundStyle(Color(hex: "C2B8A8")).fixedSize().offset(y: 42)
-                        }
-                        .offset(x: -96)
-                        .accessibilityLabel("AI 采访录音")
-                }
+                .simultaneousGesture(TapGesture().onEnded { if !talking { EngineRecorder.trace("TAP 红键 → launch record"); recordLaunch = RecordLaunch(tag: nil) } })
             Text(talking ? (willCancel ? "上滑取消 · 松开放弃" : "松开发送 · 上滑取消") : "轻点录音 · 长按说话")
                 .font(.system(size: 12)).tracking(1)
                 .foregroundStyle(talking ? Theme.accent : Theme.secondary)

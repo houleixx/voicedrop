@@ -1,43 +1,45 @@
 import Foundation
 import Observation
 
-/// Orchestrates a realtime AI-interviewer recording session: owns the
-/// `EngineRecorder` (two-engine, no VPIO — VPIO gave 0 mic buffers on iOS 26 / this
-/// device after exhaustive attempts) and the `RealtimeSession` (relay WS). Wires mic
-/// PCM → relay and AI audio → speaker.
+/// Orchestrates a recording session with an ON-DEMAND AI interviewer overlay.
 ///
-/// Turn-taking is SERVER/PROMPT-driven (2026-07-08): the worker configures
-/// `semantic_vad` + `create_response:true` + `interrupt_response:false`, and the
-/// interviewer instructions tell the model to stay silent and only interject a brief
-/// question when the speaker is stuck. No app-side timer / rate-limit here.
+/// ARCHITECTURE (2026-07-08, "采访 = 录音的可叠加旁路"): recording and the interview
+/// are decoupled. `start()` starts ONLY the `EngineRecorder` (two-engine, no VPIO —
+/// VPIO gave 0 mic buffers on this device) — that's the sacred main path, writing the
+/// m4a from the tap unconditionally. The AI interview is a SIDE-PATH the user toggles
+/// on/off mid-recording via the 采访 button: `toggleInterview()` connects/disconnects
+/// the relay WS. The tap's PCM tee feeds the relay only while the interview is active;
+/// the file write never depends on any of this.
+///
+/// Turn-taking is SERVER/PROMPT-driven: the worker configures `semantic_vad` +
+/// `create_response:true` + `interrupt_response:false`, and the interviewer
+/// instructions tell the model to stay silent and only interject when the speaker
+/// is stuck. No app-side timer here.
 ///
 /// HALF-DUPLEX (no AEC): the AI's loudspeaker leaks into the mic, so while the AI is
-/// speaking we PAUSE the mic uplink (mute) and resume after a short echo tail — this
-/// stops the model hearing its own voice (which would loop or cut its turn short).
-/// Trade-off: you can't barge-in mid-AI-turn, but AI turns are short (<5 s). AI audio
-/// in the recording is acceptable (user-confirmed).
+/// speaking we PAUSE the uplink (mute) and resume only after response.done AND the
+/// playback has drained + a short echo tail — otherwise the model hears its own tail
+/// and loops. AI audio in the recording is acceptable (user-confirmed).
 ///
-/// Recording is sacred: `engine.start()` runs first; the relay is best-effort and any
-/// failure just degrades (recording continues). Billing is server-side.
+/// Each toggle-on → toggle-off is an independent relay session; the worker settles
+/// billing on WS close.
 @MainActor
 @Observable
-final class RealtimeInterviewer {
+final class RealtimeInterviewer: RecordingBackend {
     let engine = EngineRecorder()
     let session = RealtimeSession()
 
+    /// The interview side-path is currently on (relay connected or connecting).
+    private(set) var interviewActive = false
     private(set) var connState: RealtimeSession.State = .idle
 
-    /// One-line diagnostics for the on-screen overlay (realtime mode).
+    /// One-line diagnostics for the on-screen overlay (shown while interviewing).
     var debugLine: String {
         "tap \(engine.tapBuffers) · WS \(connState.rawValue) · 语音 \(session.speechEvents) · AI音 \(session.audioDeltas)"
             + (engine.engineError.map { " · ⚠️\($0)" } ?? "")
     }
 
-    // Half-duplex: no AEC on device (VPIO killed the tap), so the AI's loudspeaker leaks
-    // into the mic. To stop the model from hearing itself (and either looping or cutting
-    // its own turn short), we PAUSE the mic uplink while the AI is speaking, then resume
-    // after a short tail so the room echo has died down. This loses true barge-in, but the
-    // AI's turns are short (<5 s) and this is the only reliable capture path on-device.
+    // Half-duplex state — see class comment.
     private var aiSpeaking = false
     private var aiTurnEnded = false          // OpenAI finished GENERATING (response.done)
     private var resumeTask: Task<Void, Never>?
@@ -48,28 +50,59 @@ final class RealtimeInterviewer {
         set { engine.onInterrupted = newValue }
     }
 
-    /// Start recording (sacred) + connect the relay. Throws only if RECORDING can't
-    /// start — the relay never throws here (failure = degraded, recording continues).
+    /// Start RECORDING only (sacred). The interview is NOT connected here — the user
+    /// toggles it with the 采访 button. Throws only if recording can't start.
     func start() throws {
-        EngineRecorder.trace("interviewer.start(): wiring callbacks")
+        wireCallbacks()
+        EngineRecorder.trace("interviewer.start(): engine.start() BEGIN (recording only, no relay)")
+        try engine.start()
+        EngineRecorder.trace("interviewer.start(): engine.start() END — recording live")
+    }
+
+    /// 采访 button: toggle the AI side-path. Recording is never touched.
+    func toggleInterview() {
+        if interviewActive { stopInterview() } else { startInterview() }
+    }
+
+    private func startInterview() {
+        guard engine.isRecording else { return }
+        EngineRecorder.trace("interviewer.startInterview(): connecting relay")
+        interviewActive = true
+        aiSpeaking = false
+        aiTurnEnded = false
+        session.connect()       // best-effort; failure = degraded badge, recording continues
+    }
+
+    private func stopInterview() {
+        EngineRecorder.trace("interviewer.stopInterview(): disconnecting relay (recording continues)")
+        interviewActive = false
+        resumeTask?.cancel(); resumeTask = nil
+        muteWatchdog?.cancel(); muteWatchdog = nil
+        aiSpeaking = false
+        aiTurnEnded = false
+        engine.stopAIPlayback()   // silence any in-flight AI speech immediately
+        session.disconnect()      // worker settles this segment's billing on close
+    }
+
+    private func wireCallbacks() {
         session.onStateChange     = { [weak self] s in self?.connState = s }
         session.onResponseCreated = { [weak self] in self?.beginAiTurn() }             // AI about to speak
-        session.onAudioDelta      = { [weak self] pcm in self?.beginAiTurn(); self?.engine.playAI(pcm) }
+        session.onAudioDelta      = { [weak self] pcm in
+            guard let self, self.interviewActive else { return }   // toggle-off: drop late audio
+            self.beginAiTurn(); self.engine.playAI(pcm)
+        }
         session.onResponseDone    = { [weak self] in self?.aiTurnEnded = true; self?.tryResume() }
         engine.onPlaybackDrained  = { [weak self] in self?.tryResume() }               // AI audio finished PLAYING
         engine.onPCM              = { [weak self] pcm in
-            guard let self, !self.aiSpeaking else { return }   // half-duplex: don't feed the AI its own echo
+            // The tee feeds the AI ONLY while interviewing and the AI isn't speaking
+            // (half-duplex). The m4a write happened before this callback, always.
+            guard let self, self.interviewActive, !self.aiSpeaking else { return }
             self.session.appendAudio(pcm)
         }
-
-        EngineRecorder.trace("interviewer.start(): engine.start() BEGIN")
-        try engine.start()      // if this throws, nothing else has run — no AI, no relay
-        EngineRecorder.trace("interviewer.start(): engine.start() END → session.connect()")
-        session.connect()       // best-effort
-        EngineRecorder.trace("interviewer.start(): session.connect() returned (recording live)")
     }
 
     private func beginAiTurn() {
+        guard interviewActive else { return }
         resumeTask?.cancel(); resumeTask = nil
         aiSpeaking = true
         aiTurnEnded = false
@@ -82,10 +115,8 @@ final class RealtimeInterviewer {
         }
     }
 
-    /// Resume the mic uplink ONLY after the AI has finished generating (response.done)
-    /// AND its audio has finished playing out of the loudspeaker (playback drained),
-    /// plus a short echo tail. Resuming on response.done alone let the still-playing AI
-    /// audio re-enter the mic → OpenAI heard itself → non-stop looping.
+    /// Resume the uplink ONLY after the AI has finished generating (response.done)
+    /// AND its audio has finished playing (playback drained), plus a short echo tail.
     private func tryResume() {
         guard aiSpeaking, aiTurnEnded, engine.isPlaybackIdle else { return }
         resumeTask?.cancel()
@@ -99,9 +130,7 @@ final class RealtimeInterviewer {
 
     @discardableResult
     func stop() -> AudioRecorder.Recording? {
-        resumeTask?.cancel(); resumeTask = nil
-        muteWatchdog?.cancel(); muteWatchdog = nil
-        session.disconnect()    // worker settles billing on close
+        if interviewActive { stopInterview() }
         return engine.stop()
     }
 
@@ -109,4 +138,5 @@ final class RealtimeInterviewer {
     var isRecording: Bool { engine.isRecording }
     var elapsed: TimeInterval { engine.elapsed }
     var level: Double { engine.level }
+    var startDate: Date? { engine.startDate }
 }
