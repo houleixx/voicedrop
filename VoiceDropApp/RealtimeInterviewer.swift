@@ -13,9 +13,15 @@ import Observation
 @Observable
 final class RealtimeInterviewer {
     let engine = EngineRecorder()
-    private let session = RealtimeSession()
+    let session = RealtimeSession()
 
     private(set) var connState: RealtimeSession.State = .idle
+
+    /// One-line diagnostics for the on-screen overlay (realtime mode).
+    var debugLine: String {
+        "tap \(engine.tapBuffers) · WS \(connState.rawValue) · 语音 \(session.speechEvents) · AI音 \(session.audioDeltas)"
+            + (engine.engineError.map { " · ⚠️\($0)" } ?? "")
+    }
 
     // Turn logic (constants device-tunable).
     private let silenceThreshold: TimeInterval = 5   // ask only after ≥5 s pause

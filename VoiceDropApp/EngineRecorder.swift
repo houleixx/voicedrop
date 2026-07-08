@@ -28,6 +28,10 @@ final class EngineRecorder: RecordingBackend {
     private(set) var startDate: Date?
     var onInterrupted: ((AudioRecorder.Recording) -> Void)?
 
+    // On-screen diagnostics (shown in realtime mode) — turns "doesn't work" into data.
+    private(set) var tapBuffers = 0        // mic buffers that reached the tap (0 = tap dead)
+    private(set) var engineError: String?  // any capture/file error
+
     /// Mic PCM teed for the AI uplink: mono Int16 little-endian @ 24 kHz.
     var onPCM: ((Data) -> Void)?
 
@@ -53,45 +57,31 @@ final class EngineRecorder: RecordingBackend {
 
     func start() throws {
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.duckOthers, .defaultToSpeaker])
+        try session.setCategory(.playAndRecord, mode: .default, options: [.duckOthers, .defaultToSpeaker])
         try session.setActive(true)
 
         let input = engine.inputNode
-        try? input.setVoiceProcessingEnabled(true)          // AEC/AGC/NS; before wiring + before reading format
-
-        // NATIVE input format, read AFTER voice processing is enabled. Using this
-        // exact format for the tap is what makes buffers actually flow.
-        let tapFormat = input.outputFormat(forBus: 0)
-        guard tapFormat.sampleRate > 0, tapFormat.channelCount > 0 else {
-            throw NSError(domain: "VoiceDrop.EngineRecorder", code: 1,
-                          userInfo: [NSLocalizedDescriptionKey: "麦克风输入不可用"])
-        }
+        try? input.setVoiceProcessingEnabled(true)          // AEC/AGC/NS (best-effort)
 
         // AI playback path through the engine (gives voice-processing its reference signal).
         engine.attach(player)
         engine.connect(player, to: engine.mainMixerNode, format: EngineRecorder.aiFormat)
 
-        // AAC file at the NATIVE rate/channels so `file.processingFormat == tapFormat`
-        // and `write(from:)` accepts the tap buffers directly (no conversion, no throw).
-        let settings: [String: Any] = [
-            AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
-            AVSampleRateKey: tapFormat.sampleRate,
-            AVNumberOfChannelsKey: Int(tapFormat.channelCount),
-            AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue,
-        ]
         let now = Date()
         let url = AudioRecorder.stagingURL(start: now)
-        let file = try AVAudioFile(forWriting: url, settings: settings)
-
-        let s = Sink(file: file, aiRate: EngineRecorder.aiRate)
+        // Sink creates the AAC file LAZILY from the first buffer's own format, so the
+        // file always matches what the tap delivers — no format guessing, no mismatch.
+        let s = Sink(url: url, aiRate: EngineRecorder.aiRate)
         s.onTee = { [weak self] pcm, lvl in
-            Task { @MainActor in self?.level = lvl; self?.onPCM?(pcm) }
+            Task { @MainActor in self?.tapBuffers += 1; self?.level = lvl; self?.onPCM?(pcm) }
         }
+        s.onError = { [weak self] msg in Task { @MainActor in self?.engineError = msg } }
         sink = s
         currentURL = url
         startInstant = now
 
-        input.installTap(onBus: 0, bufferSize: 4096, format: tapFormat, block: s.makeTapBlock())
+        // format: nil → the input node's NATIVE format (guaranteed to deliver buffers).
+        input.installTap(onBus: 0, bufferSize: 4096, format: nil, block: s.makeTapBlock())
         engine.prepare()
         try engine.start()
         player.play()
@@ -99,6 +89,8 @@ final class EngineRecorder: RecordingBackend {
         startDate = now
         isRecording = true
         elapsed = 0
+        tapBuffers = 0
+        engineError = nil
         startTicking()
     }
 
@@ -151,15 +143,34 @@ final class EngineRecorder: RecordingBackend {
     // MARK: - Audio-thread sink (owns the file; @unchecked Sendable like VolcAudioStreamer)
 
     private final class Sink: @unchecked Sendable {
-        private let file: AVAudioFile
+        private let url: URL
         private let aiRate: Double
+        private var file: AVAudioFile?      // created lazily from the first buffer's format
+        private var failed = false
         var onTee: (@Sendable (Data, Double) -> Void)?
-        init(file: AVAudioFile, aiRate: Double) { self.file = file; self.aiRate = aiRate }
+        var onError: (@Sendable (String) -> Void)?
+        init(url: URL, aiRate: Double) { self.url = url; self.aiRate = aiRate }
 
         func makeTapBlock() -> @Sendable (AVAudioPCMBuffer, AVAudioTime) -> Void {
             { [weak self] buffer, _ in
                 guard let self else { return }
-                try? self.file.write(from: buffer)                       // SACRED: file first
+                // Lazily open the AAC file using the buffer's ACTUAL format → processingFormat
+                // always matches, so write(from:) never fails on a format mismatch.
+                if self.file == nil && !self.failed {
+                    let f = buffer.format
+                    let settings: [String: Any] = [
+                        AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
+                        AVSampleRateKey: f.sampleRate,
+                        AVNumberOfChannelsKey: Int(f.channelCount),
+                        AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue,
+                    ]
+                    do { self.file = try AVAudioFile(forWriting: self.url, settings: settings) }
+                    catch { self.failed = true; self.onError?("建文件失败: \(error.localizedDescription)") }
+                }
+                if let file = self.file {
+                    do { try file.write(from: buffer) }                  // SACRED: file first
+                    catch { self.onError?("写文件失败: \(error.localizedDescription)") }
+                }
                 if let pcm = EngineRecorder.resampleToInt16(buffer, outRate: self.aiRate), !pcm.isEmpty {
                     self.onTee?(pcm, EngineRecorder.rms(buffer))         // best-effort tee
                 }

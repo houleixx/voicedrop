@@ -24,6 +24,8 @@ final class RealtimeSession {
     var onStateChange: ((State) -> Void)?
 
     private(set) var state: State = .idle { didSet { if state != oldValue { onStateChange?(state) } } }
+    private(set) var speechEvents = 0    // diagnostics: speech_started/stopped received
+    private(set) var audioDeltas = 0     // diagnostics: AI audio chunks received
 
     private var task: URLSessionWebSocketTask?
     private var urlSession: URLSession?
@@ -69,9 +71,10 @@ final class RealtimeSession {
         guard let obj = (try? JSONSerialization.jsonObject(with: Data(str.utf8))) as? [String: Any],
               let type = obj["type"] as? String else { return }
         switch type {
-        case "input_audio_buffer.speech_started": onSpeechStarted?()
-        case "input_audio_buffer.speech_stopped": onSpeechStopped?()
+        case "input_audio_buffer.speech_started": speechEvents += 1; onSpeechStarted?()
+        case "input_audio_buffer.speech_stopped": speechEvents += 1; onSpeechStopped?()
         case "response.output_audio.delta":
+            audioDeltas += 1
             if let b64 = obj["delta"] as? String, let d = Data(base64Encoded: b64) { onAudioDelta?(d) }
         case "response.done":
             onResponseDone?()

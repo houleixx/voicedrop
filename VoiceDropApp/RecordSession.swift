@@ -30,8 +30,10 @@ struct RecordSession: View {
     @State private var showCamera = false
 
     // Live UI state from whichever backend is active this session.
-    private var activeElapsed: TimeInterval { realtime ? interviewer.elapsed : recorder.elapsed }
-    private var activeLevel: Double { realtime ? interviewer.level : recorder.level }
+    // Read the engine's observed props DIRECTLY (not through a computed passthrough)
+    // so SwiftUI reliably tracks the nested @Observable and the stopwatch updates.
+    private var activeElapsed: TimeInterval { realtime ? interviewer.engine.elapsed : recorder.elapsed }
+    private var activeLevel: Double { realtime ? interviewer.engine.level : recorder.level }
     private var realtimeStatusText: String {
         switch interviewer.connState {
         case .connecting: return "AI 连接中…"
@@ -99,6 +101,10 @@ struct RecordSession: View {
                 }
                 if realtime {
                     Text(realtimeStatusText).font(.system(size: 11)).tracking(1).foregroundStyle(Theme.faint)
+                    // Diagnostic line — read these values to me if AI 采访 misbehaves.
+                    Text(interviewer.debugLine)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(Theme.faint).padding(.top, 2)
                 }
             }
             .padding(.top, 64)
