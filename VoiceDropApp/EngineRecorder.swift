@@ -1,6 +1,7 @@
 import Foundation
 @preconcurrency import AVFoundation
 import Observation
+import os
 
 /// AVAudioEngine recording backend, used ONLY in realtime (AI) mode. Produces a
 /// valid AAC mono `recording-<ts>.m4a` (same staging name as `AudioRecorder`), so
@@ -29,6 +30,7 @@ import Observation
 @MainActor
 @Observable
 final class EngineRecorder: RecordingBackend {
+    nonisolated static let log = Logger(subsystem: "dev.jianshuo.voicedrop", category: "realtime")
     private(set) var isRecording = false
     private(set) var elapsed: TimeInterval = 0
     private(set) var level: Double = 0
@@ -73,10 +75,13 @@ final class EngineRecorder: RecordingBackend {
     /// recording UI. Activating `.playAndRecord` spins up the input HW; a short settle
     /// lets the route come up, so the subsequent `engine.start()` is fast. Idempotent.
     static func prewarm() async {
+        let t0 = Date()
         let s = AVAudioSession.sharedInstance()
         try? s.setCategory(.playAndRecord, mode: .default, options: [.duckOthers, .defaultToSpeaker])
         try? s.setActive(true)
+        log.info("prewarm: session active +\(Date().timeIntervalSince(t0), format: .fixed(precision: 3))s")
         try? await Task.sleep(for: .milliseconds(150))
+        log.info("prewarm: done +\(Date().timeIntervalSince(t0), format: .fixed(precision: 3))s")
     }
 
     func start() throws {
@@ -87,10 +92,12 @@ final class EngineRecorder: RecordingBackend {
 
         var tapInstalled = false
         var captureStarted = false
+        let tStart = Date()
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playAndRecord, mode: .default, options: [.duckOthers, .defaultToSpeaker])
             try session.setActive(true)
+            EngineRecorder.log.info("start: session active +\(Date().timeIntervalSince(tStart), format: .fixed(precision: 3))s")
 
             let now = Date()
             let url = AudioRecorder.stagingURL(start: now)
@@ -113,7 +120,10 @@ final class EngineRecorder: RecordingBackend {
             input.installTap(onBus: 0, bufferSize: 4096, format: nil, block: s.makeTapBlock())
             tapInstalled = true
             captureEngine.prepare()
+            let tEng = Date()
+            EngineRecorder.log.info("start: captureEngine.start() BEGIN +\(Date().timeIntervalSince(tStart), format: .fixed(precision: 3))s")
             try captureEngine.start()
+            EngineRecorder.log.info("start: captureEngine.start() END took \(Date().timeIntervalSince(tEng), format: .fixed(precision: 3))s (total +\(Date().timeIntervalSince(tStart), format: .fixed(precision: 3))s)")
             captureStarted = true
 
             // 2) PLAYBACK engine — started LAZILY on the first AI audio (see playAI). Starting
@@ -126,7 +136,9 @@ final class EngineRecorder: RecordingBackend {
             isRecording = true
             elapsed = 0
             startTicking()
+            EngineRecorder.log.info("start: RECORDING (total +\(Date().timeIntervalSince(tStart), format: .fixed(precision: 3))s)")
         } catch {
+            EngineRecorder.log.error("start: THREW +\(Date().timeIntervalSince(tStart), format: .fixed(precision: 3))s: \(error.localizedDescription, privacy: .public)")
             // Transactional rollback so the graph/session is clean for the next attempt.
             if tapInstalled { captureEngine.inputNode.removeTap(onBus: 0) }
             if captureStarted && captureEngine.isRunning { captureEngine.stop() }
