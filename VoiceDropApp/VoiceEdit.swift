@@ -129,6 +129,10 @@ final class SpeechDictation {
     private var sequence: Int32 = 1
     private var stopping = false
     private var tapInstalled = false
+    // 回合代际:每次 start() 递增。stopAndGetFinal() 等尾包最长 1.5s,期间用户
+    // 再次按下会开新连接;旧回合收尾只许关自己那一代的 socket,不能误杀新回合的
+    // (否则新回合麦克风照跑、socket 已死——「说话没人听」+「连接中断:cancelled」)。
+    private var turn = 0
 
     func requestAuth() async {
         let mic = await AVAudioApplication.requestRecordPermission()
@@ -146,6 +150,7 @@ final class SpeechDictation {
             error = String(localized: "未登录，无法连接语音识别服务。")
             return
         }
+        turn += 1
         transcript = ""
         error = nil
         stopping = false
@@ -184,13 +189,29 @@ final class SpeechDictation {
         isRecording = false
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
 
+        // 快照本回合的连接与代际:等尾包期间 isRecording 已是 false,用户再按
+        // 就会 start() 新回合(换连接、清 transcript)。之后只关这份快照。
+        let myTurn = turn
+        let ws = task, s = session, streamer = audioStreamer
+        var lastTranscript = transcript
+
         for _ in 0..<30 {
             try? await Task.sleep(nanoseconds: 50_000_000)
+            if turn != myTurn { break }      // 被新回合抢占,transcript 已不是本回合的
+            lastTranscript = transcript
             if !stopping { break }
         }
-        closeSocket()
-        stopping = false
-        return transcript
+
+        streamer?.cancel()
+        ws?.cancel(with: .goingAway, reason: nil)
+        s?.invalidateAndCancel()
+        if turn == myTurn {
+            audioStreamer = nil
+            task = nil
+            session = nil
+            stopping = false
+        }
+        return lastTranscript
     }
 
     private func openSocket() {
@@ -264,9 +285,13 @@ final class SpeechDictation {
     }
 
     private func receive() {
-        task?.receive { [weak self] result in
+        guard let ws = task else { return }
+        ws.receive { [weak self] result in
             Task { @MainActor in
                 guard let self else { return }
+                // 只认当前连接:closeSocket()/换回合后,旧 socket 被 cancel 产生的
+                // 「cancelled」失败回调和迟到的识别结果一律丢弃,不弹误报、不污染新回合。
+                guard ws === self.task else { return }
                 switch result {
                 case .failure(let err):
                     if self.stopping {
