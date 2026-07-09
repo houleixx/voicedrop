@@ -551,9 +551,8 @@ struct RecordingDetailView: View {
     private func firstPhotoImage() async -> UIImage? {
         guard let body = articles[safe: articleIndex]?.body,
               let relKey = ArticleBody.firstPhotoKey(in: body, photos: doc?.photos ?? []),
-              let scope = await store.ownerScope(),
-              let data = await store.photoData(fullKey: scope + relKey) else { return nil }
-        return UIImage(data: data)
+              let scope = await store.ownerScope() else { return nil }
+        return await store.photoImage(fullKey: scope + relKey)
     }
 
     /// 分享到小红书（第一期：内容包 + 剪贴板直达）：服务端把文章转成小红书文案
@@ -575,8 +574,7 @@ struct RecordingDetailView: View {
         var images: [UIImage] = []
         if !pack.photoKeys.isEmpty, let scope = await store.ownerScope() {
             for relKey in pack.photoKeys.prefix(9) {   // 小红书一篇最多 9 图
-                if let data = await store.photoData(fullKey: scope + relKey),
-                   let img = UIImage(data: data) { images.append(img) }
+                if let img = await store.photoImage(fullKey: scope + relKey) { images.append(img) }
             }
         }
         let room = 9 - images.count
@@ -1189,8 +1187,7 @@ struct PhotoTile: View {
         // 失败钉在缓存里，轮询若被缓存应答就永远自愈不了（2026-07-09 实测）。
         var attempt = 0
         while !Task.isCancelled && Date() < deadline {
-            if let data = await store.photoData(fullKey: scope + relKey, ignoringLocalCache: attempt > 0),
-               let ui = UIImage(data: data) {
+            if let ui = await store.photoImage(fullKey: scope + relKey, ignoringLocalCache: attempt > 0) {
                 image = ui; showMaking = false; return
             }
             attempt += 1

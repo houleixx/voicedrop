@@ -750,7 +750,7 @@ private struct RowCoverIcon: View {
         image = cached
         if cached != nil { return }
         guard let scope = await store.ownerScope() else { return }
-        if let data = await store.photoData(fullKey: scope + relKey), let ui = UIImage(data: data) {
+        if let ui = await store.photoImage(fullKey: scope + relKey) {
             Self.cache.setObject(ui, forKey: relKey as NSString)
             // Guard against a stale set if the row got recycled to a new key mid-fetch
             // (.task(id:) cancels the old task on key change).

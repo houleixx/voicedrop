@@ -6,6 +6,30 @@ import UIKit
 /// already drifting in URL encoding. Centralize so the endpoint, auth, and
 /// encoding live once.
 enum PhotoService {
+    /// Decoded-image cache, keyed by full R2 key. Photo keys are immutable content
+    /// addresses (an AI edit mints a NEW key, it never rewrites the old one), so a
+    /// hit can be trusted forever — no TTL, no revalidation. NSCache evicts under
+    /// memory pressure on its own; cost is the decoded bitmap size, not the JPEG size.
+    // NSCache is documented thread-safe; it just isn't marked Sendable.
+    nonisolated(unsafe) private static let decodedCache: NSCache<NSString, UIImage> = {
+        let c = NSCache<NSString, UIImage>()
+        c.totalCostLimit = 128 << 20   // ~128MB of decoded pixels (~20 张 1080p 图)
+        return c
+    }()
+
+    /// Fetch + decode a photo, front-loaded by the in-process image cache: a repeat
+    /// visit to an article renders its photos instantly instead of re-downloading.
+    /// `ignoringLocalCache` skips the cache READ (a retry must probe the network) but
+    /// a successful fetch is always written back.
+    static func image(fullKey: String, ignoringLocalCache: Bool = false) async -> UIImage? {
+        if !ignoringLocalCache, let hit = decodedCache.object(forKey: fullKey as NSString) { return hit }
+        guard let d = await data(fullKey: fullKey, ignoringLocalCache: ignoringLocalCache),
+              let ui = UIImage(data: d) else { return nil }
+        let px = ui.size.width * ui.size.height * ui.scale * ui.scale
+        decodedCache.setObject(ui, forKey: fullKey as NSString, cost: Int(px * 4))
+        return ui
+    }
+
     /// Download a photo by its FULL R2 key via the public `/photo/<key>` endpoint
     /// (no auth — the one photo URL the app, community, and web pages all use).
     ///

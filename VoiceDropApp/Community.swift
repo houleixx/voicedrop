@@ -222,10 +222,10 @@ final class CommunityStore {
         } catch { return nil }
     }
 
-    /// Download a photo by its full R2 key (`users/<sub>/photos/…`) via the public
-    /// `/photo/<key>` endpoint — no auth, the same URL the web pages use. One photo
-    /// logic everywhere: read straight from the photo's original location.
-    func photoData(fullKey: String) async -> Data? { await PhotoService.data(fullKey: fullKey) }
+    /// Download + decode a photo by its full R2 key (`users/<sub>/photos/…`) via the
+    /// public `/photo/<key>` endpoint — no auth, the same URL the web pages use. One
+    /// photo logic everywhere (incl. the shared in-process image cache).
+    func photoImage(fullKey: String) async -> UIImage? { await PhotoService.image(fullKey: fullKey) }
 
     // MARK: 投币（互助扩散：作者 2 币、投币者 0.5 币，即时换算力到账）
 
@@ -821,9 +821,8 @@ struct CommunityPostView: View {
     private func firstPhotoImage() async -> UIImage? {
         guard let owner = full?.owner,
               let body = full?.articles?[safe: articleIndex]?.body,
-              let relKey = ArticleBody.firstPhotoKey(in: body, photos: full?.photos ?? []),
-              let data = await store.photoData(fullKey: owner + relKey) else { return nil }
-        return UIImage(data: data)
+              let relKey = ArticleBody.firstPhotoKey(in: body, photos: full?.photos ?? []) else { return nil }
+        return await store.photoImage(fullKey: owner + relKey)
     }
 
     // MARK: Toast
@@ -883,8 +882,7 @@ struct CommunityPhotoTile: View {
             // Bind to the key (not view identity) so a shifted marker re-fetches.
             .task(id: fullKey) {
                 image = nil
-                guard let data = await store.photoData(fullKey: fullKey) else { return }
-                image = UIImage(data: data)
+                image = await store.photoImage(fullKey: fullKey)
             }
     }
 }
