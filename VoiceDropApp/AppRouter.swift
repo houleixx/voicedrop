@@ -47,7 +47,11 @@ final class AppRouter: ObservableObject {
     func handle(_ url: URL) {
         let scheme = url.scheme?.lowercased()
         if scheme == "https" || scheme == "http" {
-            if let link = Self.universalLink(url) { pending = link }
+            if let link = Self.universalLink(url) {
+                pending = link
+                // 邀请归因第 1 层：分享链接拉起 App = 确定归因（24h 内新装才实际生效）。
+                if case .shareLink(let id, _) = link { ReferralManager.shared.noteShareToken(id) }
+            }
             return
         }
         guard url.scheme?.lowercased() == "voicedrop" else { return }
