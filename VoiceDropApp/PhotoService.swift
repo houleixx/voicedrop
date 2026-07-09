@@ -8,12 +8,19 @@ import UIKit
 enum PhotoService {
     /// Download a photo by its FULL R2 key via the public `/photo/<key>` endpoint
     /// (no auth — the one photo URL the app, community, and web pages all use).
-    static func data(fullKey: String) async -> Data? {
+    ///
+    /// `ignoringLocalCache` exists because CFNetwork can pin a failed response for a
+    /// URL despite the server's `no-store` (seen 2026-07-09: an AI photo's 制作中-window
+    /// miss stuck forever while Safari showed the same URL fine). Retry attempts MUST
+    /// bypass the local cache or a cached failure can never self-heal.
+    static func data(fullKey: String, ignoringLocalCache: Bool = false) async -> Data? {
         guard !fullKey.isEmpty,
               let url = URL(string: "\(API.filesBase.absoluteString)/photo/\(fullKey.urlPathEncoded)")
         else { return nil }
+        var req = URLRequest(url: url)
+        if ignoringLocalCache { req.cachePolicy = .reloadIgnoringLocalCacheData }
         do {
-            let (data, resp) = try await URLSession.shared.data(from: url)
+            let (data, resp) = try await URLSession.shared.data(for: req)
             return resp.isOK ? data : nil
         } catch { return nil }
     }

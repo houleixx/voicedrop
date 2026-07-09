@@ -1185,10 +1185,15 @@ struct PhotoTile: View {
         }
         defer { grace.cancel() }
         let deadline = Date().addingTimeInterval(300)   // 5 分钟封顶
+        // 重试（attempt > 0）必须绕过本地 URL 缓存：CFNetwork 可能无视 no-store 把一次
+        // 失败钉在缓存里，轮询若被缓存应答就永远自愈不了（2026-07-09 实测）。
+        var attempt = 0
         while !Task.isCancelled && Date() < deadline {
-            if let data = await store.photoData(fullKey: scope + relKey), let ui = UIImage(data: data) {
+            if let data = await store.photoData(fullKey: scope + relKey, ignoringLocalCache: attempt > 0),
+               let ui = UIImage(data: data) {
                 image = ui; showMaking = false; return
             }
+            attempt += 1
             try? await Task.sleep(nanoseconds: 3_000_000_000)  // 3s 后重试（仅在图可见且未出时）
         }
         if image == nil && !Task.isCancelled { failed = true }

@@ -849,7 +849,9 @@ final class LibraryStore {
 
     /// Download a photo by its full R2 key via the public `/photo/<key>` endpoint
     /// (no auth — the one photo URL shared by the community + web pages).
-    func photoData(fullKey: String) async -> Data? { await PhotoService.data(fullKey: fullKey) }
+    func photoData(fullKey: String, ignoringLocalCache: Bool = false) async -> Data? {
+        await PhotoService.data(fullKey: fullKey, ignoringLocalCache: ignoringLocalCache)
+    }
 
     /// Download the audio to a temp file for local playback.
     func downloadAudio(_ rec: Recording) async -> URL? {
