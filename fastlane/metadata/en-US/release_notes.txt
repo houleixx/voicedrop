@@ -1,6 +1,6 @@
 What's new:
-• AI interview: turn it on mid-recording and it asks follow-up questions to draw your ideas out
-• Push notifications: get pinged the moment an article is ready, tap to open it
-• Hold-to-speak editing is far more reliable, with clear error messages
-• Community share links open smoothly inside WeChat
-• Faster cold start and dozens of recording stability fixes
+• Invite friends: share your invite link and you both earn credits when they join
+• Share links open right in the app — tap a community post or a friend's share and jump straight in
+• More reliable AI cover images: fixed covers stuck on "generating", and images you've seen now load instantly
+• The AI interviewer listens better — fixed it occasionally talking over you
+• Tap an "article ready" notification and land directly on the finished article
