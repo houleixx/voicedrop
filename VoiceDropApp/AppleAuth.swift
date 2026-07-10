@@ -53,6 +53,15 @@ final class AuthStore {
         session = keychainLoad(account: sessionAccount)
         if let s = session, isJWTExpired(s) { keychainDelete(account: sessionAccount); session = nil }
         anonToken = loadOrCreateAnon()
+        #if DEBUG
+        // Simulator screenshot rig: SIMCTL_CHILD_VD_ADOPT_TOKEN=anon_… simctl launch …
+        // adopts a real account before anyone reads `bearer`. DEBUG-only.
+        if let t = ProcessInfo.processInfo.environment["VD_ADOPT_TOKEN"],
+           t.hasPrefix("anon_"), t.count >= 20 {
+            keychainSave(t, account: anonAccount)
+            anonToken = t
+        }
+        #endif
         AppGroup.publishBearer(anonToken)   // mirror to the Share Extension
     }
 

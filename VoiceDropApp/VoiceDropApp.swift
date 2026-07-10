@@ -11,6 +11,18 @@ struct VoiceDropApp: App {
             RootView()
                 .environmentObject(router)
                 .onOpenURL { router.handle($0) }   // voicedrop://<page> + universal links — see AppRouter/DeepLink
+                #if DEBUG
+                // Simulator screenshot rig: SIMCTL_CHILD_VD_OPEN_URL=voicedrop://…
+                // navigates in-app on launch, skipping the SpringBoard openurl
+                // confirmation dialog simctl can't tap. DEBUG-only.
+                .task {
+                    if let s = ProcessInfo.processInfo.environment["VD_OPEN_URL"],
+                       let u = URL(string: s) {
+                        try? await Task.sleep(for: .seconds(12))
+                        router.handle(u)
+                    }
+                }
+                #endif
                 // Universal links (https://voicedrop.cn/…) arrive as an NSUserActivity;
                 // some iOS versions deliver ONLY here, not via onOpenURL. Same handler.
                 .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { activity in

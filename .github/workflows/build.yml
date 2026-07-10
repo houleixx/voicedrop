@@ -19,6 +19,11 @@ on:
           - testflight   # build + upload to TestFlight (same as a push to main)
           - appstore     # submit the build already on TestFlight to App Store review
           - certs        # one-shot: run match refresh_profiles (create/sync signing profiles), no build/upload
+      force:
+        description: 'appstore only: replace a version already WAITING_FOR_REVIEW (reject + resubmit)'
+        required: false
+        default: false
+        type: boolean
 
 # Serialize all builds: two parallel runs would each compute
 # latest_testflight_build_number + 1 and collide on the same build number.
@@ -86,7 +91,7 @@ jobs:
           if [ "${{ github.event.inputs.destination }}" = "certs" ]; then
             bundle exec fastlane refresh_profiles
           elif [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.destination }}" = "appstore" ]; then
-            bundle exec fastlane release skip_build:true
+            bundle exec fastlane release skip_build:true force:${{ inputs.force && 'true' || 'false' }}
           else
             bundle exec fastlane beta
           fi
