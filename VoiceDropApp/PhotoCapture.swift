@@ -1,6 +1,7 @@
 import SwiftUI
 import AVFoundation
 import PhotosUI
+import Photos
 
 // MARK: - SwiftUI wrapper
 
@@ -595,11 +596,17 @@ private final class PhotoDelegate: NSObject, AVCapturePhotoCaptureDelegate, @unc
               let full = SquareImage.jpeg(image),
               let thumb = SquareImage.jpeg(image, maxSide: 264, maxBytes: 80_000)
         else { return }
-        // Also save a copy to the user's Photos library — the square WYSIWYG version
-        // matching the viewfinder. Camera shots only; PHPicker imports already live there.
+        // Also save a copy to the user's Photos library — the ORIGINAL sensor bytes
+        // (full resolution + EXIF, no re-encode), not the ≤1080 square upload JPEG:
+        // 相册是用户的底片库，按最高规格存；方图只是 App/R2 的上传口径。
+        // Camera shots only; PHPicker imports already live there.
         // Needs NSPhotoLibraryAddUsageDescription; a denied permission just no-ops.
-        if let square = UIImage(data: full) {
-            UIImageWriteToSavedPhotosAlbum(square, nil, nil, nil)
+        Task {
+            if await PHPhotoLibrary.requestAuthorization(for: .addOnly) == .authorized {
+                try? await PHPhotoLibrary.shared().performChanges {
+                    PHAssetCreationRequest.forAsset().addResource(with: .photo, data: raw, options: nil)
+                }
+            }
         }
         onResult(ShotPayload(date: Date(), full: full, thumb: thumb))
     }
