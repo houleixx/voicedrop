@@ -8,7 +8,7 @@ import Photos
 /// A photo kept by the camera, handed back on 完成 for upload.
 struct CapturedPhoto: Sendable {
     let date: Date     // capture moment → becomes the R2 filename (per-photo timestamp)
-    let data: Data     // square ≤1080px JPEG, <900KB
+    let data: Data     // upload JPEG <900KB：拍照=方形 ≤1080；相册导入=原比例长边 ≤1440
 }
 
 struct PhotoCaptureView: UIViewControllerRepresentable {
@@ -512,8 +512,10 @@ final class PhotoCaptureVC: UIViewController, PHPickerViewControllerDelegate {
             let provider = r.itemProvider
             guard provider.canLoadObject(ofClass: UIImage.self) else { continue }
             provider.loadObject(ofClass: UIImage.self) { obj, _ in
+                // 相册导入保持原始长宽比只压缩（长边 ≤1440）——用户挑的构图不该被裁方；
+                // 拍照路径仍走方图（取景框是方的，所见即所得）。缩略图照旧方裁（胶卷条 UI）。
                 guard let img = obj as? UIImage,
-                      let full = SquareImage.jpeg(img),
+                      let full = SquareImage.fitJPEG(img),
                       let thumb = SquareImage.jpeg(img, maxSide: 264, maxBytes: 80_000) else { return }
                 sink.send(ShotPayload(date: Date(), full: full, thumb: thumb))
             }
@@ -574,6 +576,31 @@ enum SquareImage {
             while let d = data, d.count > maxBytes, q > 0.4 {
                 q -= 0.1
                 data = square.jpegData(compressionQuality: q)
+            }
+            return data
+        }
+    }
+
+    /// 相册导入用的等比压缩：不裁剪，长边缩到 ≤maxSide，JPEG 压到 maxBytes 以内。
+    /// （jpeg(_:) 是方裁版，给方形取景的相机快门用。）
+    static func fitJPEG(_ image: UIImage, maxSide: CGFloat = 1440, maxBytes: Int = 900_000) -> Data? {
+        autoreleasepool {
+            let s = image.size
+            guard s.width > 0, s.height > 0 else { return nil }
+            let pxW = s.width * image.scale, pxH = s.height * image.scale
+            let k = min(1, maxSide / max(pxW, pxH))
+            let out = CGSize(width: max(1, (pxW * k).rounded()), height: max(1, (pxH * k).rounded()))
+            let fmt = UIGraphicsImageRendererFormat.default()
+            fmt.scale = 1
+            fmt.opaque = true
+            let scaled = UIGraphicsImageRenderer(size: out, format: fmt).image { _ in
+                image.draw(in: CGRect(origin: .zero, size: out))   // applies EXIF orientation
+            }
+            var q: CGFloat = 0.8
+            var data = scaled.jpegData(compressionQuality: q)
+            while let d = data, d.count > maxBytes, q > 0.4 {
+                q -= 0.1
+                data = scaled.jpegData(compressionQuality: q)
             }
             return data
         }
