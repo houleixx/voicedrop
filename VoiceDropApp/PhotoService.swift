@@ -60,32 +60,13 @@ enum PhotoService {
         req.httpMethod = "PUT"
         req.setBearer(bearer)
         req.setValue("image/jpeg", forHTTPHeaderField: "Content-Type")
-        let body = Self.squareJPEG(data) ?? data
-        req.httpBody = body
+        // 原样直传：进这里的字节都已被来源路径正确处理（拍照=方图 ≤1080、相册
+        // 导入=原比例长边 ≤1440）。以前这里会再裁一次 1:1，把导入保住的长宽比
+        // 又剪掉——显示端 PhotoTile 本就按真实比例自适应，不需要方图。
+        req.httpBody = data
         do {
             let (_, resp) = try await URLSession.shared.data(for: req)
             return resp.isOK ? relKey : nil
         } catch { return nil }
-    }
-
-    /// Center-crop image data to a 1:1 square, re-encoded as JPEG. Returns nil on failure
-    /// (caller falls back to the original bytes). Photos are square everywhere in the app
-    /// (article tiles are 1:1) and AI edits follow the input aspect ratio, so squaring at
-    /// upload keeps both the stored photo and its edited version 1:1.
-    static func squareJPEG(_ data: Data, quality: CGFloat = 0.9) -> Data? {
-        guard let img = UIImage(data: data) else { return nil }
-        let side = min(img.size.width, img.size.height)
-        if side <= 0 { return nil }
-        let x = (img.size.width - side) / 2
-        let y = (img.size.height - side) / 2
-        let format = UIGraphicsImageRendererFormat.default()
-        format.scale = img.scale
-        format.opaque = true
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: side, height: side), format: format)
-        let out = renderer.image { _ in
-            // draw the upright image shifted so the centered square lands at (0,0)
-            img.draw(in: CGRect(x: -x, y: -y, width: img.size.width, height: img.size.height))
-        }
-        return out.jpegData(compressionQuality: quality)
     }
 }
