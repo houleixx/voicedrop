@@ -31,9 +31,15 @@
 ### 2. 活绑定 + 开关撤销（不是快照）
 
 - 编辑页一个**开关**：开 → 出码；关 → 码立即失效。开关的心智就是「这条指令处于
-  分享中」，所以码是**活指针**——`shares/<码>` 存 `{sub, itemId}` 而非文本快照，
-  落地页与兑换时**现算**生效文本（内置缺省 ← 全局覆盖 ← 该用户覆盖，与
-  `/agent/ui-config/custom` 同一条合并路径）。作者改完保存，分享侧自动同步。
+  分享中」——作者改完保存，分享侧自动同步（活绑定）。
+- **实现 = 写穿副本，不是读时现算**：`shares/<码>` 直接存当前生效文本
+  `{type:"prompt", sub, itemId, label, instruction, createdAt, updatedAt}`。
+  铸码时算一次（内置缺省 ← 全局覆盖 ← 该用户覆盖，与 `/agent/ui-config/custom`
+  同一条合并路径），此后 `PUT /agent/ui-config/custom` 保存该条指令时经
+  `refreshPromptShare` 同步重写（已关闭的不复活）。好处：落地页（Pages）与
+  兑换（worker）都只读**一个对象**，Pages 不必跨包 import worker 的合并逻辑，
+  热路径零额外 R2 读。已知边界：运营改**全局默认**（R2 config/ui-config.json）
+  不会推送到已分享的未自定义条目——作者任意重新保存一次即同步，接受。
 - **一条指令一辈子一个码**：每用户索引 `users/<sub>/prompt-shares.json` =
   `{"byItem":{"<itemId>":{"code","createdAt"}},"mintLog":["<iso>",…]}`。
   关闭 = 删 `shares/<码>` 但**保留索引**；再开 = 同码重建（不必重新告诉朋友新号码）。
