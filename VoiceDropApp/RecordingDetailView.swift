@@ -144,54 +144,51 @@ struct RecordingDetailView: View {
         preview = []
     }
 
+    /// 只在生成尚未吐字时兜底的转圈卡片（吐字后正文原地打字，见 articlePane）。
     private var restylingOverlay: some View {
         ZStack {
             Color.black.opacity(0.12).ignoresSafeArea()
-            if preview.isEmpty {
-                // 还没吐出正文（或走了无增量的中转路径）：老的转圈卡片兜底。
-                VStack(spacing: 12) {
-                    ProgressView().tint(Theme.accent)
-                    Text("正在用新风格重写…").font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.ink)
-                }
-                .padding(.horizontal, 26).padding(.vertical, 22)
-                .background(Theme.card, in: RoundedRectangle(cornerRadius: 16))
-                .overlay(RoundedRectangle(cornerRadius: 16).stroke(Theme.borderChrome, lineWidth: 1))
-            } else {
-                // 幽灵稿：新风格的正文边生成边长出来，跟着尾部滚动。
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 18) {
-                            ForEach(preview.indices, id: \.self) { i in
-                                VStack(alignment: .leading, spacing: 10) {
-                                    if !preview[i].title.isEmpty {
-                                        Text(preview[i].title)
-                                            .font(.system(size: 20, weight: .semibold)).foregroundStyle(Theme.inkRead)
-                                    }
-                                    if !preview[i].body.isEmpty {
-                                        Text(preview[i].body)
-                                            .font(.system(size: 15)).foregroundStyle(Theme.bodyRead).lineSpacing(7)
-                                    }
-                                }
-                            }
-                            HStack(spacing: 8) {
-                                ProgressView().controlSize(.small).tint(Theme.accent)
-                                Text("正在重写…").font(.system(size: 12.5)).foregroundStyle(Theme.secondary)
-                            }
-                            .id("previewEnd")
-                        }
-                        .padding(20)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .onChange(of: preview.last?.body.count ?? 0) { _, _ in
-                        withAnimation(.linear(duration: 0.15)) { proxy.scrollTo("previewEnd", anchor: .bottom) }
-                    }
-                }
-                .frame(maxHeight: 480)
-                .background(Theme.card, in: RoundedRectangle(cornerRadius: 16))
-                .overlay(RoundedRectangle(cornerRadius: 16).stroke(Theme.borderChrome, lineWidth: 1))
-                .padding(.horizontal, 18).padding(.vertical, 60)
+            VStack(spacing: 12) {
+                ProgressView().tint(Theme.accent)
+                Text("正在用新风格重写…").font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.ink)
             }
+            .padding(.horizontal, 26).padding(.vertical, 22)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(Theme.borderChrome, lineWidth: 1))
         }
+    }
+
+    /// 整篇重写（换风格 / 语音 write_article）的正文内打字：新稿以正式排版在
+    /// 阅读区流式长出。photo 标记不显示（预览期先滤掉，成稿由真实版本渲染）。
+    private func livePreviewContent() -> some View {
+        VStack(alignment: .leading, spacing: 22) {
+            ForEach(preview.indices, id: \.self) { i in
+                let isTail = i == preview.count - 1
+                if !preview[i].title.isEmpty || isTail {
+                    Text(preview[i].title + (isTail && preview[i].body.isEmpty ? "▍" : ""))
+                        .font(.system(size: 23, weight: .semibold)).foregroundStyle(Theme.inkRead)
+                        .lineSpacing(5).fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, i == 0 ? 14 : 18)
+                }
+                let body = Self.previewDisplayBody(preview[i].body)
+                if !body.isEmpty {
+                    Text(body + (isTail ? "▍" : ""))
+                        .font(.system(size: 16)).foregroundStyle(Theme.bodyRead)
+                        .lineSpacing(9)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            Color.clear.frame(height: 1).id("livePreviewEnd")
+        }
+    }
+
+    /// 预览期的正文显示：去掉完整的 [[photo:…]] 标记，并截掉结尾未写完的半个标记。
+    static func previewDisplayBody(_ s: String) -> String {
+        var out = s.replacingOccurrences(of: #"\[\[photo:[^\]]*\]\]"#, with: "", options: .regularExpression)
+        if let r = out.range(of: "[[", options: .backwards), !out[r.lowerBound...].contains("]]") {
+            out = String(out[..<r.lowerBound])
+        }
+        return out.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     var body: some View {
@@ -214,7 +211,7 @@ struct RecordingDetailView: View {
             if !articles.isEmpty { bottomBar }
         }
         .overlay(alignment: .bottom) { toastView }
-        .overlay { if restyling || !preview.isEmpty { restylingOverlay } }
+        .overlay { if restyling && preview.isEmpty { restylingOverlay } }   // 吐字前转圈；吐字后正文原地打字
         .overlay {
             if let m = lpMenu {
                 LongpressMenuOverlay(model: m) {
@@ -734,9 +731,13 @@ struct RecordingDetailView: View {
 
     private var articlePane: some View {
         // 整条播放条已收进顶部播放键，正文直接上移、阅读区更大。
+        ScrollViewReader { proxy in
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                if let a = articles[safe: articleIndex] {
+                if !preview.isEmpty {
+                    // 整篇重写进行中：新稿以正式排版在阅读区原地打出（老稿让位）。
+                    livePreviewContent()
+                } else if let a = articles[safe: articleIndex] {
                     Text(liveTitle.map { $0 + "▍" } ?? a.title)
                         .font(.system(size: 23, weight: .semibold)).foregroundStyle(Theme.inkRead)
                         .lineSpacing(5).fixedSize(horizontal: false, vertical: true)
@@ -759,6 +760,11 @@ struct RecordingDetailView: View {
             }
             .padding(.horizontal, 20)
             .padding(.bottom, 8)
+        }
+        .onChange(of: preview.last.map { $0.title.count + $0.body.count } ?? 0) { _, c in
+            guard c > 0 else { return }
+            withAnimation(.linear(duration: 0.15)) { proxy.scrollTo("livePreviewEnd", anchor: .bottom) }
+        }
         }
         .contentMargins(.bottom, 96, for: .scrollContent)   // clear the floating pill
         // Tapping anywhere on the article body dismisses a lingering agent reply.
