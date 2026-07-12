@@ -38,12 +38,17 @@ final class ArticleAgentSession: VoiceAgentSession {
     var onUpdate: ((ArticleDoc?, [String]) -> Void)?
     var onReply: ((String, Bool) -> Void)?
 
-    /// 实时预览（换风格/重写）：服务端边生成边推的纯文本增量。
+    /// 实时预览（换风格/重写/语音整篇改写）：服务端边生成边推的纯文本增量。
     /// a = 文章下标，field = "title" | "body"。
     struct PreviewDelta: Equatable { let a: Int; let field: String; let text: String }
     var onPreview: (([PreviewDelta]) -> Void)?
     var onPreviewReset: (() -> Void)?
     var onPreviewDone: ((Bool) -> Void)?
+
+    /// 行级语音编辑的打字机流：i = 本轮第几个操作，op = replace_line/insert_after/set_title，
+    /// line = 目标行号（set_title 为 nil），text = 新文本增量。
+    struct EditDelta: Equatable { let i: Int; let op: String; let line: Int?; let text: String }
+    var onEditPreview: (([EditDelta]) -> Void)?
 
     private var task: URLSessionWebSocketTask?
     private var session: URLSession?
@@ -185,6 +190,12 @@ final class ArticleAgentSession: VoiceAgentSession {
             onPreviewReset?()
         case "preview-done":
             onPreviewDone?(obj["ok"] as? Bool ?? true)
+        case "edit-preview":
+            let deltas = ((obj["items"] as? [[String: Any]]) ?? []).compactMap { it -> EditDelta? in
+                guard let i = it["i"] as? Int, let op = it["op"] as? String, let t = it["text"] as? String else { return nil }
+                return EditDelta(i: i, op: op, line: it["line"] as? Int, text: t)
+            }
+            if !deltas.isEmpty { onEditPreview?(deltas) }
         default:
             break
         }

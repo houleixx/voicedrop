@@ -53,6 +53,7 @@ struct RecordingDetailView: View {
     @State private var showRestyle = false       // 换风格重写 sheet
     @State private var restyling = false         // /agent/restyle in flight
     @State private var preview: [(title: String, body: String)] = []   // 重写实时预览（幽灵稿），按文章下标累积
+    @State private var editPreview: (label: String, text: String)? = nil   // 行级语音编辑打字机卡片
     @State private var lpMenu: LongpressPresentation?   // 长按操作菜单（自绘覆盖层）
 
     // Undo/redo: versions (oldest-first) + head loaded on open and refreshed after
@@ -173,7 +174,7 @@ struct RecordingDetailView: View {
                             }
                             HStack(spacing: 8) {
                                 ProgressView().controlSize(.small).tint(Theme.accent)
-                                Text("正在用新风格重写…").font(.system(size: 12.5)).foregroundStyle(Theme.secondary)
+                                Text("正在重写…").font(.system(size: 12.5)).foregroundStyle(Theme.secondary)
                             }
                             .id("previewEnd")
                         }
@@ -190,6 +191,28 @@ struct RecordingDetailView: View {
                 .padding(.horizontal, 18).padding(.vertical, 60)
             }
         }
+    }
+
+    /// 行级语音编辑的打字机卡片：目标行标签 + 边生成边长的新文本（带光标）。
+    /// 停在底部（说话条上方），回合结束（updated/reply）自动消失。
+    private func typewriterCard(_ ep: (label: String, text: String)) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.mini).tint(Theme.accent)
+                Text(ep.label).font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.secondary)
+            }
+            Text(ep.text + "▍")
+                .font(.system(size: 14)).foregroundStyle(Theme.ink).lineSpacing(5)
+                .lineLimit(4, reservesSpace: false)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 11)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.borderChrome, lineWidth: 1))
+        .shadow(color: .black.opacity(0.08), radius: 10, y: 3)
+        .padding(.horizontal, 16).padding(.bottom, 88)   // 说话条上方
+        .transition(.move(edge: .bottom).combined(with: .opacity))
+        .animation(.easeOut(duration: 0.2), value: ep.label)
     }
 
     var body: some View {
@@ -212,7 +235,8 @@ struct RecordingDetailView: View {
             if !articles.isEmpty { bottomBar }
         }
         .overlay(alignment: .bottom) { toastView }
-        .overlay { if restyling { restylingOverlay } }
+        .overlay(alignment: .bottom) { if let ep = editPreview { typewriterCard(ep) } }
+        .overlay { if restyling || !preview.isEmpty { restylingOverlay } }
         .overlay {
             if let m = lpMenu {
                 LongpressMenuOverlay(model: m) {
@@ -341,6 +365,8 @@ struct RecordingDetailView: View {
         guard !connected, !articles.isEmpty else { return }
         connected = true
         agent.onUpdate = { [self] newDoc, _ in
+            editPreview = nil                 // 回合结束：打字机卡片让位给真实变更闪光
+            if !restyling { preview = [] }    // 语音整篇改写的幽灵稿也收场
             guard let newDoc else { return }
             let oldArticles = articles
             doc = newDoc
@@ -350,14 +376,14 @@ struct RecordingDetailView: View {
             // A new agent edit writes a new version; refresh history and reset to latest.
             Task { await loadVersionHistory() }
         }
-        agent.onReply = { text, ok in
+        agent.onReply = { [self] text, ok in
+            editPreview = nil
             // The reply stays on screen until it's replaced by a newer one or the
             // user taps elsewhere on the page — no auto-dismiss timer.
             agentReply = AgentReply(text: text, ok: ok)
         }
-        // 重写实时预览：服务端边生成边推（已按 ~250ms 合批），按文章下标拼接。
+        // 实时预览（幽灵稿）：换风格 restyle 和语音整篇改写（write_article）共用。
         agent.onPreview = { [self] deltas in
-            guard restyling else { return }   // 不在重写中收到的残留增量：忽略
             for d in deltas {
                 while preview.count <= d.a { preview.append((title: "", body: "")) }
                 if d.field == "title" { preview[d.a].title += d.text }
@@ -366,8 +392,26 @@ struct RecordingDetailView: View {
         }
         agent.onPreviewReset = { [self] in preview = [] }
         agent.onPreviewDone = { [self] ok in
-            // HTTP 响应可能比这个晚（长文生成超时）——谁先到谁收尾，幂等。
-            Task { await finishRestyle(success: ok) }
+            if restyling {
+                // HTTP 响应可能比这个晚（长文生成超时）——谁先到谁收尾，幂等。
+                Task { await finishRestyle(success: ok) }
+            } else {
+                preview = []   // 语音改写：真实结果由紧随其后的 updated 呈现
+            }
+        }
+        // 行级语音编辑的打字机：目标行 + 新文本边生成边显示在底部卡片。
+        agent.onEditPreview = { [self] deltas in
+            for d in deltas {
+                let label: String
+                switch d.op {
+                case "replace_line": label = String(localized: "第 \(d.line ?? 0) 行 · 改写中")
+                case "insert_after": label = d.line == 0 ? String(localized: "开头 · 插入中") : String(localized: "第 \(d.line ?? 0) 行后 · 插入中")
+                case "set_title": label = String(localized: "标题 · 改写中")
+                default: continue
+                }
+                if editPreview?.label != label { editPreview = (label: label, text: "") }
+                editPreview?.text += d.text
+            }
         }
         followup.patch = { [self] id, status in
             Task { await store.patchQuestion(recording, id: id, status: status) }

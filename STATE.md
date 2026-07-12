@@ -1,6 +1,26 @@
 # VoiceDrop — project state (read this first)
 
-Last updated: 2026-07-11（服务端已部署）
+Last updated: 2026-07-12（服务端已部署）
+
+## 新功能：编辑实时预览全家桶（2026-07-12，服务端已上线 + E2E 实测，iOS 已发 TestFlight）
+
+LLM 调用全面改流式（anthropic.js 永远 stream:true，SSE 内部聚合、调用方零改动），
+由此解锁三层实时预览 + 修复超长录音挖矿事故链：
+
+- **524 根因修复**：非流式被 Anthropic 门口的 Cloudflare ~100s 掐线;2h12m 录音
+  (4万字转写)168s 生成必死。流式后一次成功——那条录音已挖出 13 篇文章。
+  连带:ASR checkpoint(.asrdone.json,完成即落盘,失败重试复用不重扣费,
+  asrCharged 按 stem 终生一次)、连续失败熔断(5 次→.blocked(mine-failed)+
+  admin 推送)、挖矿 max_tokens 8000→24000(截断报人话错误)。
+- **重写幽灵稿**（/agent/restyle + write_article 工具）：preview-delta/reset/done
+  经详情页 WS 广播,App 显示流式长出的新稿;preview-done 兜底 HTTP 超时收尾。
+- **行级打字机**（edit_current_article 工具）：edit-preview {i,op,line,text},
+  App 底部卡片显示「第 N 行 · 改写中」+ 流式新文本。
+- **relay 透传**：中转 DO 把 SSE 原样管回,调用方聚合——地域封锁用户同样有增量。
+
+核心部件 agent/src/preview.js（PreviewExtractor/EditOpsExtractor：JSON 流里剥
+纯文本,任意 chunk 切断安全;makePreviewPusher/makeEditPreview 合批广播）。
+E2E:重写 93 批增量/2107 字符,编辑打字机 replace_line 增量+updated 全过。
 
 ## 新功能：指令分享码「魔法数字」（2026-07-11，服务端已上线，真机手测通过，TestFlight 已发）
 
