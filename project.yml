@@ -63,6 +63,9 @@ targets:
           - group.com.wangjianshuo.VoiceDrop
     dependencies:
       - target: VoiceDropShare
+    scheme:
+      testTargets:
+        - VoiceDropTests
     settings:
       base:
         SWIFT_VERSION: "6.0"
@@ -131,3 +134,14 @@ targets:
           CODE_SIGN_STYLE: Manual
           CODE_SIGN_IDENTITY: "Apple Distribution"
           PROVISIONING_PROFILE_SPECIFIER: "match AppStore com.wangjianshuo.VoiceDrop.Share"
+
+  VoiceDropTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [VoiceDropTests]
+    dependencies:
+      - target: VoiceDrop
+    settings:
+      GENERATE_INFOPLIST_FILE: YES
+      TEST_HOST: "$(BUILT_PRODUCTS_DIR)/VoiceDrop.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/VoiceDrop"
+      BUNDLE_LOADER: "$(TEST_HOST)"
