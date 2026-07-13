@@ -692,6 +692,10 @@ export function validateList(template, items) {
           const err = walk(c, 1);
           if (err) return err;
         }
+      } else if (node.children !== undefined) {
+        // ⚠️ action 挂 children 必须显式报错。否则那个数组【既不校验也不计数】——
+        // {ref:"sys_cartoon", children:[500 条垃圾]} 会整包混进存储并绕过 200 条上限。
+        return "action must not carry children";
       }
       return null;
     }
@@ -704,7 +708,8 @@ export function validateList(template, items) {
     if (node.type !== "action" && node.type !== "group") return `bad type: ${node.type}`;
     const label = typeof node.label === "string" ? node.label.trim() : "";
     if (!label) return "label must not be empty";
-    if (label.length > MAX_LABEL) return `label too long (max ${MAX_LABEL})`;
+    // ⚠️ 长度必须量【原串】而不是 trim 后的：否则 " ".repeat(10000)+"A" 能绕过上限。
+    if (node.label.length > MAX_LABEL) return `label too long (max ${MAX_LABEL})`;
     if (node.forkedFrom !== undefined && !idx.has(node.forkedFrom)) return `unknown forkedFrom: ${node.forkedFrom}`;
 
     if (node.type === "group") {
@@ -719,6 +724,7 @@ export function validateList(template, items) {
     }
 
     // action
+    if (node.children !== undefined) return "action must not carry children";   // 同上：不校验不计数的走私通道
     if (typeof node.prompt !== "string" || !node.prompt.trim()) return "prompt must not be empty";
     if (node.prompt.length > MAX_PROMPT) return `prompt too long (max ${MAX_PROMPT})`;
     if (!Array.isArray(node.appliesTo) || node.appliesTo.length === 0) return "appliesTo must be a non-empty array";
