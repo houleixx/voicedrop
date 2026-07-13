@@ -887,8 +887,8 @@ final class LibraryStore {
 
     /// Download a photo by its full R2 key via the public `/photo/<key>` endpoint
     /// (no auth — the one photo URL shared by the community + web pages).
-    func photoImage(fullKey: String, ignoringLocalCache: Bool = false) async -> UIImage? {
-        await PhotoService.image(fullKey: fullKey, ignoringLocalCache: ignoringLocalCache)
+    func photoImage(fullKey: String, ignoringLocalCache: Bool = false, preferThumb: Bool = false) async -> UIImage? {
+        await PhotoService.image(fullKey: fullKey, ignoringLocalCache: ignoringLocalCache, preferThumb: preferThumb)
     }
 
     /// Download the audio to a temp file for local playback.

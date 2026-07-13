@@ -166,7 +166,7 @@ private struct PhotoCoverCard: View {
         .feedCardShadow()
         .task(id: coverKey) {
             guard image == nil else { return }
-            if let img = await store.photoImage(fullKey: coverKey) {
+            if let img = await store.photoImage(fullKey: coverKey, preferThumb: true) {
                 image = img
                 onAspect(img.size.width / max(img.size.height, 1))
             }

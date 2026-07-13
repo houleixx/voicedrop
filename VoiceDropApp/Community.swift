@@ -287,7 +287,9 @@ final class CommunityStore {
     /// Download + decode a photo by its full R2 key (`users/<sub>/photos/…`) via the
     /// public `/photo/<key>` endpoint — no auth, the same URL the web pages use. One
     /// photo logic everywhere (incl. the shared in-process image cache).
-    func photoImage(fullKey: String) async -> UIImage? { await PhotoService.image(fullKey: fullKey) }
+    func photoImage(fullKey: String, preferThumb: Bool = false) async -> UIImage? {
+        await PhotoService.image(fullKey: fullKey, preferThumb: preferThumb)
+    }
 
     // MARK: 投币（互助扩散：作者 2 币、投币者 0.5 币，即时换算力到账）
 
