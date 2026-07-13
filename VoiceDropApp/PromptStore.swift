@@ -182,6 +182,59 @@ enum PromptLogic {
         return items
     }
 
+    // MARK: - Task 7：拖动排序 / 拖进拖出分组（全部纯函数，PromptManagerView 排序态 draft 上调用）
+
+    /// 顶层重排：把 `fromTop` 位置的节点挪到 `toTop`（语义与 SwiftUI `.onMove`/
+    /// `Array.move(fromOffsets:toOffset:)` 一致——`toTop` 是"移除前"的插入基准位，
+    /// 需要在移除后按位置关系整体减一再插入，与该 API 的标准实现一致）。
+    /// `fromTop` 越界 → 原数组原样返回。
+    static func moving(_ items: [PromptNode], fromTop: Int, toTop: Int) -> [PromptNode] {
+        guard items.indices.contains(fromTop) else { return items }
+        var copy = items
+        let node = copy.remove(at: fromTop)
+        var dest = toTop
+        if fromTop < dest { dest -= 1 }
+        dest = max(0, min(dest, copy.count))
+        copy.insert(node, at: dest)
+        return copy
+    }
+
+    /// 组内重排：定位到 `groupID` 的 children 数组，在其上复用 `moving` 的同一套算法。
+    /// 找不到该组（或它不是 group）→ 原数组原样返回。
+    static func movingWithinGroup(_ items: [PromptNode], groupID: String, fromChild: Int, toChild: Int) -> [PromptNode] {
+        guard let gi = items.firstIndex(where: { $0.id == groupID && $0.type == "group" }) else { return items }
+        var copy = items
+        copy[gi].children = moving(copy[gi].children ?? [], fromTop: fromChild, toTop: toChild)
+        return copy
+    }
+
+    /// 拖进分组：把 `actionID` 对应节点（不论当前在顶层还是另一个组里）挪到 `groupID`
+    /// 这个组的 children 末尾。**两级封顶**：`actionID` 本身若是个 group（type=="group"）
+    /// → 返回 nil（调用方据此忽略 + 触觉反馈，不落地这次 drop）。目标 `groupID` 不存在 /
+    /// 不是 group / 与 actionID 相同 → 同样返回 nil。
+    static func movingIntoGroup(_ items: [PromptNode], actionID: String, groupID: String) -> [PromptNode]? {
+        guard actionID != groupID else { return nil }
+        let (afterRemoval, removed) = removing(items, id: actionID)
+        guard let node = removed, node.type != "group" else { return nil }
+        guard let gi = afterRemoval.firstIndex(where: { $0.id == groupID && $0.type == "group" }) else { return nil }
+        var copy = afterRemoval
+        var children = copy[gi].children ?? []
+        children.append(node)
+        copy[gi].children = children
+        return copy
+    }
+
+    /// 拖出分组：把 `childID` 从它所在的组里摘除，插回顶层数组的 `toTopIndex` 位置
+    /// （越界会被夹到 [0, count] 合法范围）。找不到该 id → 原数组原样返回。
+    static func movingOutOfGroup(_ items: [PromptNode], childID: String, toTopIndex: Int) -> [PromptNode] {
+        let (afterRemoval, removed) = removing(items, id: childID)
+        guard let node = removed else { return items }
+        var copy = afterRemoval
+        let idx = max(0, min(toTopIndex, copy.count))
+        copy.insert(node, at: idx)
+        return copy
+    }
+
     /// 5b 过滤：action 按 appliesTo 命中锚点；group 保留命中的子项，全不命中则整组消失。
     static func filter(_ items: [PromptNode], for anchor: PromptAnchor) -> [PromptNode] {
         items.compactMap { filterNode($0, for: anchor) }
@@ -550,6 +603,26 @@ final class PromptStore {
         let snapshot = items
         isMutating = true
         items = PromptLogic.replacing(items, id: id, with: newNode)
+        let err = await save()
+        isMutating = false
+        if let err {
+            items = snapshot
+            return err
+        }
+        return nil
+    }
+
+    /// Task 7「完成」：排序态整棵 draft 树一次性 PUT（这就是当初选整树写的原因——排序/
+    /// 分组结构天然被一次 PUT 承载，不需要专门的"移动"端点）。失败**保留 draft 由调用方
+    /// 处理**——这里只回滚 `items` 本身（不像 delete/add/replace 那样在此确定终态），
+    /// 因为排序态是否要退出、draft 要不要留给用户重试，是视图层的决定（PromptManagerView：
+    /// 失败就留在排序态，draft 原封不动，用户可以直接再按一次「完成」重试）。同一套
+    /// snapshot/`isMutating` 纪律（见 `delete` 上的长注释）。nil = 成功；非 nil = 错误文案。
+    func applyReorder(_ newItems: [PromptNode]) async -> String? {
+        guard !isMutating else { return nil }
+        let snapshot = items
+        isMutating = true
+        items = newItems
         let err = await save()
         isMutating = false
         if let err {

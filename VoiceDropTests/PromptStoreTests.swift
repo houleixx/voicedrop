@@ -334,6 +334,158 @@ final class PromptStoreTests: XCTestCase {
         XCTAssertEqual(newItems, items)
     }
 
+    // MARK: - Task 7：moving / movingWithinGroup / movingIntoGroup / movingOutOfGroup
+
+    func testMovingReordersTopLevel() {
+        let items = [
+            PromptNode(id: "a", type: "action", label: "A", origin: "user", prompt: "p", appliesTo: ["text"]),
+            PromptNode(id: "b", type: "action", label: "B", origin: "user", prompt: "p", appliesTo: ["text"]),
+            PromptNode(id: "c", type: "action", label: "C", origin: "user", prompt: "p", appliesTo: ["text"]),
+        ]
+        // 把 a（index 0）挪到 index 2（插到 c 前面）——结果应为 [B, A, C]。
+        let result = PromptLogic.moving(items, fromTop: 0, toTop: 2)
+        XCTAssertEqual(result.map(\.id), ["b", "a", "c"])
+    }
+
+    func testMovingBackwardReordersTopLevel() {
+        let items = [
+            PromptNode(id: "a", type: "action", label: "A", origin: "user", prompt: "p", appliesTo: ["text"]),
+            PromptNode(id: "b", type: "action", label: "B", origin: "user", prompt: "p", appliesTo: ["text"]),
+            PromptNode(id: "c", type: "action", label: "C", origin: "user", prompt: "p", appliesTo: ["text"]),
+        ]
+        // 把 c（index 2）挪到最前面（index 0）——结果应为 [C, A, B]。
+        let result = PromptLogic.moving(items, fromTop: 2, toTop: 0)
+        XCTAssertEqual(result.map(\.id), ["c", "a", "b"])
+    }
+
+    func testMovingOutOfBoundsFromIndexLeavesUnchanged() {
+        let items = [PromptNode(id: "a", type: "action", label: "A", origin: "user", prompt: "p", appliesTo: ["text"])]
+        let result = PromptLogic.moving(items, fromTop: 5, toTop: 0)
+        XCTAssertEqual(result, items)
+    }
+
+    func testMovingPreservesOrderElsewhere() {
+        // 顶层四项，挪动其中一项，其余三项的相对顺序不变。
+        let items = (0..<4).map { PromptNode(id: "n\($0)", type: "action", label: "N", origin: "user", prompt: "p", appliesTo: ["text"]) }
+        let result = PromptLogic.moving(items, fromTop: 3, toTop: 1)
+        XCTAssertEqual(result.map(\.id), ["n0", "n3", "n1", "n2"])
+        XCTAssertEqual(Set(result.map(\.id)), Set(items.map(\.id)), "ids unique after move, no duplication/loss")
+    }
+
+    func testMovingWithinGroupReordersChildrenOnly() {
+        let items = [
+            PromptNode(id: "g", type: "group", label: "组", origin: "user", children: [
+                PromptNode(id: "c1", type: "action", label: "C1", origin: "user", prompt: "p", appliesTo: ["text"]),
+                PromptNode(id: "c2", type: "action", label: "C2", origin: "user", prompt: "p", appliesTo: ["text"]),
+                PromptNode(id: "c3", type: "action", label: "C3", origin: "user", prompt: "p", appliesTo: ["text"]),
+            ]),
+            PromptNode(id: "a", type: "action", label: "A", origin: "user", prompt: "p", appliesTo: ["text"]),
+        ]
+        let result = PromptLogic.movingWithinGroup(items, groupID: "g", fromChild: 0, toChild: 2)
+        XCTAssertEqual(result[0].children?.map(\.id), ["c2", "c1", "c3"])
+        // 组外的顶层顺序不受影响。
+        XCTAssertEqual(result.map(\.id), ["g", "a"])
+    }
+
+    func testMovingWithinGroupUnknownGroupLeavesUnchanged() {
+        let items = [PromptNode(id: "a", type: "action", label: "A", origin: "user", prompt: "p", appliesTo: ["text"])]
+        let result = PromptLogic.movingWithinGroup(items, groupID: "does-not-exist", fromChild: 0, toChild: 1)
+        XCTAssertEqual(result, items)
+    }
+
+    func testMovingIntoGroupMovesTopLevelActionToGroupEnd() {
+        let items = [
+            PromptNode(id: "g", type: "group", label: "组", origin: "user", children: [
+                PromptNode(id: "c1", type: "action", label: "C1", origin: "user", prompt: "p", appliesTo: ["text"]),
+            ]),
+            PromptNode(id: "a", type: "action", label: "A", origin: "user", prompt: "p", appliesTo: ["text"]),
+        ]
+        let result = try! XCTUnwrap(PromptLogic.movingIntoGroup(items, actionID: "a", groupID: "g"))
+        XCTAssertEqual(result.map(\.id), ["g"], "action removed from top level")
+        XCTAssertEqual(result[0].children?.map(\.id), ["c1", "a"], "appended at group's end")
+    }
+
+    func testMovingIntoGroupMovesChildFromAnotherGroup() {
+        let items = [
+            PromptNode(id: "g1", type: "group", label: "组1", origin: "user", children: [
+                PromptNode(id: "c1", type: "action", label: "C1", origin: "user", prompt: "p", appliesTo: ["text"]),
+            ]),
+            PromptNode(id: "g2", type: "group", label: "组2", origin: "user", children: [
+                PromptNode(id: "c2", type: "action", label: "C2", origin: "user", prompt: "p", appliesTo: ["text"]),
+            ]),
+        ]
+        let result = try! XCTUnwrap(PromptLogic.movingIntoGroup(items, actionID: "c1", groupID: "g2"))
+        XCTAssertEqual(result[0].children?.map(\.id), [], "removed from origin group")
+        XCTAssertEqual(result[1].children?.map(\.id), ["c2", "c1"], "appended to destination group's end")
+    }
+
+    /// 两级封顶：actionID 本身是个 group → nil（调用方据此忽略 + 触觉反馈）。
+    func testMovingIntoGroupRejectsGroupIntoGroup() {
+        let items = [
+            PromptNode(id: "g1", type: "group", label: "组1", origin: "user", children: []),
+            PromptNode(id: "g2", type: "group", label: "组2", origin: "user", children: []),
+        ]
+        XCTAssertNil(PromptLogic.movingIntoGroup(items, actionID: "g1", groupID: "g2"))
+    }
+
+    func testMovingIntoGroupUnknownActionOrGroupReturnsNil() {
+        let items = [
+            PromptNode(id: "g", type: "group", label: "组", origin: "user", children: []),
+            PromptNode(id: "a", type: "action", label: "A", origin: "user", prompt: "p", appliesTo: ["text"]),
+        ]
+        XCTAssertNil(PromptLogic.movingIntoGroup(items, actionID: "does-not-exist", groupID: "g"))
+        XCTAssertNil(PromptLogic.movingIntoGroup(items, actionID: "a", groupID: "does-not-exist"))
+        XCTAssertNil(PromptLogic.movingIntoGroup(items, actionID: "a", groupID: "a"), "target must actually be a group")
+    }
+
+    func testMovingOutOfGroupAppendsToTopLevel() {
+        let items = [
+            PromptNode(id: "g", type: "group", label: "组", origin: "user", children: [
+                PromptNode(id: "c1", type: "action", label: "C1", origin: "user", prompt: "p", appliesTo: ["text"]),
+                PromptNode(id: "c2", type: "action", label: "C2", origin: "user", prompt: "p", appliesTo: ["text"]),
+            ]),
+        ]
+        let result = PromptLogic.movingOutOfGroup(items, childID: "c1", toTopIndex: 1)
+        XCTAssertEqual(result.map(\.id), ["g", "c1"])
+        XCTAssertEqual(result[0].children?.map(\.id), ["c2"])
+    }
+
+    func testMovingOutOfGroupClampsOutOfRangeIndex() {
+        let items = [
+            PromptNode(id: "g", type: "group", label: "组", origin: "user", children: [
+                PromptNode(id: "c1", type: "action", label: "C1", origin: "user", prompt: "p", appliesTo: ["text"]),
+            ]),
+        ]
+        let result = PromptLogic.movingOutOfGroup(items, childID: "c1", toTopIndex: 999)
+        XCTAssertEqual(result.map(\.id), ["g", "c1"])
+    }
+
+    func testMovingOutOfGroupUnknownChildLeavesUnchanged() {
+        let items = [PromptNode(id: "a", type: "action", label: "A", origin: "user", prompt: "p", appliesTo: ["text"])]
+        let result = PromptLogic.movingOutOfGroup(items, childID: "does-not-exist", toTopIndex: 0)
+        XCTAssertEqual(result, items)
+    }
+
+    /// 综合：进组 + 出组往返，id 不重复不丢失。
+    func testMovingIntoThenOutOfGroupRoundTripNoDuplicationOrLoss() {
+        let items = [
+            PromptNode(id: "g", type: "group", label: "组", origin: "user", children: [
+                PromptNode(id: "c1", type: "action", label: "C1", origin: "user", prompt: "p", appliesTo: ["text"]),
+            ]),
+            PromptNode(id: "a", type: "action", label: "A", origin: "user", prompt: "p", appliesTo: ["text"]),
+        ]
+        let into = try! XCTUnwrap(PromptLogic.movingIntoGroup(items, actionID: "a", groupID: "g"))
+        let allIDsAfterInto = into.flatMap { [$0.id] + ($0.children?.map(\.id) ?? []) }
+        XCTAssertEqual(Set(allIDsAfterInto), Set(["g", "c1", "a"]))
+        XCTAssertEqual(allIDsAfterInto.count, 3, "no duplication after moving into group")
+
+        let out = PromptLogic.movingOutOfGroup(into, childID: "a", toTopIndex: 0)
+        let allIDsAfterOut = out.flatMap { [$0.id] + ($0.children?.map(\.id) ?? []) }
+        XCTAssertEqual(Set(allIDsAfterOut), Set(["g", "c1", "a"]))
+        XCTAssertEqual(allIDsAfterOut.count, 3, "no duplication after moving back out")
+        XCTAssertEqual(out.map(\.id), ["a", "g"], "moved out to top index 0")
+    }
+
     // MARK: - filter
 
     func testFilterTextOnlyAppearsOnlyInText() {
