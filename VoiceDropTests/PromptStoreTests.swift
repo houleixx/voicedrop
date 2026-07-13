@@ -525,4 +525,44 @@ final class PromptStoreTests: XCTestCase {
         XCTAssertEqual(config.groups[1].map(\.id), ["sys_insert"])
         XCTAssertEqual(config.groups[1][0].children?.count, 2)
     }
+
+    // MARK: - extractShareCode（Task 6：PromptImportSheet 粘贴解析 + universal link 边界）
+
+    /// 8 位数字必须整体拒绝——服务端同款边界：`(?<![0-9])[1-9][0-9]{6}(?![0-9])`。若只取
+    /// 正则本身「7 位数字」不带前后瞻，会把 8 位手机号片段的前 7 位误当魔法数字抠出来。
+    func testExtractShareCodeEightDigitsReturnsNil() {
+        XCTAssertNil(PromptLogic.extractShareCode("12345678"))
+    }
+
+    func testExtractShareCodeFromEmbeddedText() {
+        XCTAssertEqual(PromptLogic.extractShareCode("用 4820135 改"), "4820135")
+    }
+
+    func testExtractShareCodeFromLink() {
+        XCTAssertEqual(PromptLogic.extractShareCode("https://voicedrop.cn/4820135"), "4820135")
+    }
+
+    func testExtractShareCodeBareSevenDigits() {
+        XCTAssertEqual(PromptLogic.extractShareCode("4820135"), "4820135")
+    }
+
+    func testExtractShareCodeNoDigitsReturnsNil() {
+        XCTAssertNil(PromptLogic.extractShareCode("没有魔法数字的一段话"))
+    }
+
+    /// 首位数字不能是 0（服务端铸码规则），紧贴在 6 位数字前也凑不够 7 位——两种情况都该 nil。
+    func testExtractShareCodeLeadingZeroRejected() {
+        XCTAssertNil(PromptLogic.extractShareCode("0123456"))
+    }
+
+    /// 8 位数字不管多出来的那位贴在前面还是后面，边界都不干净——两种情况都该 nil，
+    /// 只有真正独立的 7 位数字段才中。
+    func testExtractShareCodeAdjacentDigitsOnEitherSideRejected() {
+        XCTAssertNil(PromptLogic.extractShareCode("48201359"))     // 8 位，前 7 位后面还跟着数字
+        XCTAssertNil(PromptLogic.extractShareCode("14820135"))     // 8 位，后 7 位前面还跟着数字
+    }
+
+    func testExtractShareCodePicksFirstMatchWhenMultiplePresent() {
+        XCTAssertEqual(PromptLogic.extractShareCode("先是 4820135 后来又提到 9012345"), "4820135")
+    }
 }

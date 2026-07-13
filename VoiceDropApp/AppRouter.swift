@@ -18,6 +18,9 @@ import SafariServices
 ///
 /// Universal links (entitlement applinks: voicedrop.cn / www / jianshuo.dev):
 ///   https://voicedrop.cn/                     → 我的录音（落地页 = App 主页）
+///   https://voicedrop.cn/<7位魔法数字>        → .promptImport：Prompt Manager 导入 sheet
+///     预填该码（Task 6）——纯 7 位数字，文章分享 id 是 10 位 hex、社区帖 12 位，判在
+///     .shareLink 之前，两者不会互相误判。
 ///   https://voicedrop.cn/<分享id>             → .shareLink：问服务端这个 id 指向谁
 ///     （GET /files/api/link/<id>）——自己的文章开原生详情页，别人的分享/社区帖
 ///     开站内 Safari（页面本身就是完整阅读体验）
@@ -30,6 +33,7 @@ enum DeepLink: Equatable {
     case record(tag: String?)
     case article(String)
     case shareLink(id: String, fallback: URL)
+    case promptImport(code: String)
     case web(URL)
 }
 
@@ -92,6 +96,12 @@ final class AppRouter: ObservableObject {
             return nil
         }
         guard let first = segs.first else { return .recordings }   // 落地页 = App 主页
+        // 7 位纯数字＝提示词魔法数字（Task 6），判在 shareLink 前面：文章分享 id 是 10 位
+        // hex、社区帖 12 位，跟 7 位数字没有交集，但 shareLink 的宽正则会把纯数字也吃进去，
+        // 所以窄的先判。
+        if segs.count == 1, first.range(of: "^[1-9][0-9]{6}$", options: .regularExpression) != nil {
+            return .promptImport(code: first)
+        }
         if segs.count == 1, first.range(of: "^[A-Za-z0-9_-]{6,16}$", options: .regularExpression) != nil {
             return .shareLink(id: first, fallback: url)
         }

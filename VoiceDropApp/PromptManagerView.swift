@@ -29,6 +29,9 @@ struct PromptManagerView: View {
     /// 长按分组行「重命名」→ push 编辑页（分组没有独立的编辑入口，复用同一个
     /// contextMenu 添加；PromptEditView 对 group 只画名字字段，改名系统 group 会 fork）。
     @State private var renameTarget: PromptNode?
+    /// Task 6：导入成功后高亮的新行 id，2 秒后自动清空（`#FBF3E9` 底渐隐）；
+    /// `ScrollViewReader` 配合它把列表滚到新行——见 body 里的 ScrollViewReader + rowView。
+    @State private var highlightedID: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -40,37 +43,43 @@ struct PromptManagerView: View {
             }
             .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 6)
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("一套指令，长按文字或图片时按『适用于』自动筛选。改过的系统项标『已自定义』，自己建的标『自建』。")
-                        .font(.system(size: 12.5)).foregroundStyle(Theme.secondary)
-                        .padding(.horizontal, 4).padding(.bottom, 2)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("一套指令，长按文字或图片时按『适用于』自动筛选。改过的系统项标『已自定义』，自己建的标『自建』。")
+                            .font(.system(size: 12.5)).foregroundStyle(Theme.secondary)
+                            .padding(.horizontal, 4).padding(.bottom, 2)
 
-                    if store.loading && store.items.isEmpty {
-                        HStack { Spacer(); ProgressView().tint(Theme.accent).padding(.top, 40); Spacer() }
-                    } else if let err = store.error, store.items.isEmpty {
-                        Text(err).font(.system(size: 14)).foregroundStyle(Theme.faint)
-                            .frame(maxWidth: .infinity, alignment: .center).padding(.top, 40)
-                    } else {
-                        SettingsCard {
-                            ForEach(Array(flatRows.enumerated()), id: \.element.id) { i, row in
-                                rowView(row)
-                                if i < flatRows.count - 1 { settingsRowDivider }
+                        if store.loading && store.items.isEmpty {
+                            HStack { Spacer(); ProgressView().tint(Theme.accent).padding(.top, 40); Spacer() }
+                        } else if let err = store.error, store.items.isEmpty {
+                            Text(err).font(.system(size: 14)).foregroundStyle(Theme.faint)
+                                .frame(maxWidth: .infinity, alignment: .center).padding(.top, 40)
+                        } else {
+                            SettingsCard {
+                                ForEach(Array(flatRows.enumerated()), id: \.element.id) { i, row in
+                                    rowView(row)
+                                    if i < flatRows.count - 1 { settingsRowDivider }
+                                }
                             }
-                        }
 
-                        importBox
+                            importBox
 
-                        Button {
-                            showRestoreConfirm = true
-                        } label: {
-                            Text("恢复默认提示词").font(.system(size: 13)).foregroundStyle(Theme.accent)
+                            Button {
+                                showRestoreConfirm = true
+                            } label: {
+                                Text("恢复默认提示词").font(.system(size: 13)).foregroundStyle(Theme.accent)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 4)
                         }
-                        .frame(maxWidth: .infinity)
-                        .padding(.top, 4)
                     }
+                    .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 40)
                 }
-                .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 40)
+                .onChange(of: highlightedID) { _, id in
+                    guard let id else { return }
+                    withAnimation { proxy.scrollTo(id, anchor: .center) }
+                }
             }
         }
         .background(Theme.appBG.ignoresSafeArea())
@@ -107,8 +116,17 @@ struct PromptManagerView: View {
             .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showImportSheet) {
-            Text("导入（Task 6）").font(.system(size: 15)).foregroundStyle(Theme.secondary)
-                .presentationDetents([.medium])
+            PromptImportSheet { newNode in
+                // 成功回调先于 sheet 自己的 dismiss() 跑：先标记高亮 id，等 sheet 收起动画
+                // 结束、下面的列表重新可见时，ScrollViewReader 的 onChange 立刻把它滚进视野。
+                highlightedID = newNode.id
+                Task {
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    if highlightedID == newNode.id {
+                        withAnimation(.easeOut(duration: 0.6)) { highlightedID = nil }
+                    }
+                }
+            }
         }
         .navigationDestination(item: $newActionDraft) { draft in
             PromptEditView(draft: draft)
@@ -179,7 +197,7 @@ struct PromptManagerView: View {
                         Text(node.label).font(.system(size: 15)).foregroundStyle(Theme.ink)
                         originBadge(node.origin)
                     }
-                    appliesToBadges(node.appliesTo ?? [])
+                    AppliesToBadges(appliesTo: node.appliesTo ?? [])
                 }
                 Spacer(minLength: 8)
                 settingsChevron
@@ -189,6 +207,9 @@ struct PromptManagerView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // Task 6：导入成功后 2 秒高亮新行——`#FBF3E9` 底，随 highlightedID 清空自动渐隐。
+        .background(highlightedID == node.id ? Color(hex: "FBF3E9") : Color.clear)
+        .animation(.easeInOut(duration: 0.4), value: highlightedID)
         .contextMenu {
             Button(role: .destructive) { deleteTarget = node } label: {
                 Label(String(localized: "删除"), systemImage: "trash")
@@ -254,21 +275,6 @@ struct PromptManagerView: View {
         case "custom": badge(String(localized: "已自定义"), fg: Theme.amber, bg: Theme.amberSoft, weight: .semibold)
         case "user": badge(String(localized: "自建"), fg: Theme.greenDone, bg: Theme.okBannerBG, weight: .semibold)
         default: EmptyView() // system 是常态，不画标
-        }
-    }
-
-    @ViewBuilder private func appliesToBadges(_ appliesTo: [String]) -> some View {
-        let hasText = appliesTo.contains("text")
-        let hasImage = appliesTo.contains("image")
-        HStack(spacing: 6) {
-            if hasText && hasImage {
-                badge(String(localized: "文字"), fg: Color(hex: "7A6E5C"), bg: Theme.tileNeutral)
-                badge(String(localized: "图片"), fg: Color(hex: "7A6E5C"), bg: Theme.tileNeutral)
-            } else if hasText {
-                badge(String(localized: "仅文字"), fg: Theme.greenDone, bg: Theme.okBannerBG)
-            } else if hasImage {
-                badge(String(localized: "仅图片"), fg: Theme.accent, bg: Theme.accentSoft)
-            }
         }
     }
 
@@ -358,5 +364,34 @@ struct PromptManagerView: View {
                 .padding(.bottom, 32)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
         }
+    }
+}
+
+/// 「适用于」标（仅文字 / 仅图片 / 文字+图片两枚）——PromptManagerView 列表行 AND
+/// PromptImportSheet（Task 6）预览卡共用，抽成共享 view 而不是各画一份。
+struct AppliesToBadges: View {
+    let appliesTo: [String]
+
+    var body: some View {
+        let hasText = appliesTo.contains("text")
+        let hasImage = appliesTo.contains("image")
+        HStack(spacing: 6) {
+            if hasText && hasImage {
+                tag(String(localized: "文字"), fg: Color(hex: "7A6E5C"), bg: Theme.tileNeutral)
+                tag(String(localized: "图片"), fg: Color(hex: "7A6E5C"), bg: Theme.tileNeutral)
+            } else if hasText {
+                tag(String(localized: "仅文字"), fg: Theme.greenDone, bg: Theme.okBannerBG)
+            } else if hasImage {
+                tag(String(localized: "仅图片"), fg: Theme.accent, bg: Theme.accentSoft)
+            }
+        }
+    }
+
+    private func tag(_ text: String, fg: Color, bg: Color) -> some View {
+        Text(text)
+            .font(.system(size: 10.5))
+            .foregroundStyle(fg)
+            .padding(.vertical, 1).padding(.horizontal, 6)
+            .background(bg, in: RoundedRectangle(cornerRadius: 4))
     }
 }

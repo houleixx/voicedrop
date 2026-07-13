@@ -89,6 +89,15 @@ enum PromptLogic {
         return "p_" + String(suffix)
     }
 
+    /// Task 6：粘贴/深链里抠出 7 位魔法数字。边界用负向前后瞻（与服务端解析器同一套
+    /// 边界规则）：裸 8 位数字（比如手机号片段）里不会误抠出前 7 位——`(?<![0-9])` /
+    /// `(?![0-9])` 保证匹配两侧都不是数字。找不到 → nil。
+    static func extractShareCode(_ s: String) -> String? {
+        let pattern = #"(?<![0-9])[1-9][0-9]{6}(?![0-9])"#
+        guard let range = s.range(of: pattern, options: .regularExpression) else { return nil }
+        return String(s[range])
+    }
+
     /// 纯函数删除：在整棵树（顶层 + 组内子项）里找到 id 对应节点并摘除，返回新数组 +
     /// 被删的节点；删除一个分组连它的 children 一起带走（组本身就是一个节点）；
     /// 找不到该 id → 原数组原样返回 + nil。零索引状态——调用方（PromptStore.delete）

@@ -45,6 +45,17 @@ struct LibraryView: View {
         func hash(into h: inout Hasher) { h.combine(id) }
     }
     @State private var confirmUnshare: CommunityPost?
+    // Task 6：voicedrop.cn/<7位魔法数字> universal link → 从根上弹 PromptImportSheet
+    // 预填该码（跟 webSheet 同一套「全局 sheet 兜底」模式）。PromptManagerView 深两层
+    // push（我的录音→设置→提示词）且中间没有 item-based 导航通道，把它也一并 push 到
+    // 属于「深度纠缠」，按 Task 6 brief 的兜底方案：连 showSettings 一起置位，sheet 收起后
+    // 用户已经站在设置页，一步之遥；但没有列表可滚/高亮（PromptImportSheet 的 onImported
+    // 用默认 no-op）——这点在 Task 6 报告里记了。
+    @State private var promptImportPrefill: PromptImportPrefillItem?
+    private struct PromptImportPrefillItem: Identifiable {
+        let id: String   // 码本身即可当 id：同一个码不会有两份并存的 item
+        var code: String { id }
+    }
 
     // 语音指令 walkie-talkie: the red record button itself doubles as a
     // library-wide press-and-hold mic that can act on any recording by its
@@ -228,6 +239,9 @@ struct LibraryView: View {
         .sheet(item: $webSheet) { item in
             SafariView(url: item.url).ignoresSafeArea()
         }
+        .sheet(item: $promptImportPrefill) { item in
+            PromptImportSheet(prefill: item.code)
+        }
         .onChange(of: scenePhase) { _, p in
             if p == .active { statusSession.connect(); Task { await refresh() } }
             else if p == .background { statusSession.disconnect() }
@@ -290,6 +304,12 @@ struct LibraryView: View {
                 // page in-app. Resolution is async; the .article it may enqueue
                 // re-enters this handler (and its recording guard) normally.
                 Task { await openShareLink(id, fallback: fallback) }
+            case .promptImport(let code):
+                // https://voicedrop.cn/<7位数字> — 推到设置页 + 弹导入 sheet 预填该码
+                // （Task 6；PromptManagerView 本身够不着，见上面 promptImportPrefill 的注释）。
+                selectedRec = nil; selectedPost = nil; sharedArticle = nil
+                showSettings = true
+                promptImportPrefill = PromptImportPrefillItem(id: code)
             case .web(let u):
                 webSheet = WebSheetItem(url: u)
             }
