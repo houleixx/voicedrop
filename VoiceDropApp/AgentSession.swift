@@ -7,7 +7,9 @@ enum AgentState: Equatable { case idle, connecting, working, error }
 /// the image and decide where to place it.
 struct AgentImage: Equatable {
     let key: String
-    let base64: String
+    /// 2026-07-14 起不再携带 base64：服务端按 key 自己拉 320 边缘缩图给模型
+    ///（缩图归服务端原则）。字段保留可选是给将来需要塞非 R2 图的口子。
+    let base64: String?
 }
 
 /// A live WebSocket conversation with the article-editing Agent (Durable Object
@@ -105,7 +107,11 @@ final class ArticleAgentSession: VoiceAgentSession {
         guard let task else { return }
         var payload: [String: Any] = ["type": "instruct", "id": item.id, "text": item.text, "articleIndex": item.articleIndex]
         if !item.images.isEmpty {
-            payload["images"] = item.images.map { ["key": $0.key, "data": $0.base64, "mediaType": "image/jpeg"] }
+            payload["images"] = item.images.map { img -> [String: String] in
+                var d = ["key": img.key, "mediaType": "image/jpeg"]
+                if let b64 = img.base64 { d["data"] = b64 }   // 老路径兼容口，正常不走
+                return d
+            }
         }
         guard let data = try? JSONSerialization.data(withJSONObject: payload),
               let str = String(data: data, encoding: .utf8) else { return }

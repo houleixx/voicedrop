@@ -384,10 +384,8 @@ struct RecordingDetailView: View {
                 guard let key = await store.uploadPhoto(data: photo.data, sessionTs: sessionTs, offset: offset)
                 else { showToast(String(localized: "图片上传失败")); return }
                 relKeys.append(key)
-                // Generate a 320×320 thumbnail and base64-encode it for the model to see.
-                if let thumb = makeThumbnail(from: photo.data) {
-                    agentImages.append(AgentImage(key: key, base64: thumb.base64EncodedString()))
-                }
+                // 只传 key：模型看的 320 缩图由服务端按 key 从边缘拉（客户端不缩图）。
+                agentImages.append(AgentImage(key: key, base64: nil))
             }
 
             // Each photo is referenced by its OWN key as the marker — no array index
@@ -400,15 +398,6 @@ struct RecordingDetailView: View {
             )
             showToast(String(localized: "图片已上传，AI正在插入…"))
         }
-    }
-
-    /// Resize image data to a 320×320 JPEG thumbnail for sending to the model.
-    private func makeThumbnail(from data: Data, side: Int = 320) -> Data? {
-        guard let image = UIImage(data: data) else { return nil }
-        let size = CGSize(width: side, height: side)
-        return UIGraphicsImageRenderer(size: size).image { _ in
-            image.draw(in: CGRect(origin: .zero, size: size))
-        }.jpegData(compressionQuality: 0.7)
     }
 
     // MARK: Nav bar
