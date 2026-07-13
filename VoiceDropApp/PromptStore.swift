@@ -138,6 +138,18 @@ enum PromptLogic {
         }
     }
 
+    /// 扁平化树 → 顶层 + 全部嵌套子项的 id 序列（保序）。用于排序态冲突检测：
+    /// 进入排序前的 id 序列 vs 完成时的 id 序列，任何不同都意味着列表被别处更新。
+    static func flattenIDs(_ items: [PromptNode]) -> [String] {
+        items.flatMap { node -> [String] in
+            var ids = [node.id]
+            if node.type == "group" {
+                ids += (node.children ?? []).map(\.id)
+            }
+            return ids
+        }
+    }
+
     /// 纯函数删除：在整棵树（顶层 + 组内子项）里找到 id 对应节点并摘除，返回新数组 +
     /// 被删的节点；删除一个分组连它的 children 一起带走（组本身就是一个节点）；
     /// 找不到该 id → 原数组原样返回 + nil。零索引状态——调用方（PromptStore.delete）
@@ -616,10 +628,20 @@ final class PromptStore {
     /// 分组结构天然被一次 PUT 承载，不需要专门的"移动"端点）。失败**保留 draft 由调用方
     /// 处理**——这里只回滚 `items` 本身（不像 delete/add/replace 那样在此确定终态），
     /// 因为排序态是否要退出、draft 要不要留给用户重试，是视图层的决定（PromptManagerView：
-    /// 失败就留在排序态，draft 原封不动，用户可以直接再按一次「完成」重试）。同一套
-    /// snapshot/`isMutating` 纪律（见 `delete` 上的长注释）。nil = 成功；非 nil = 错误文案。
-    func applyReorder(_ newItems: [PromptNode]) async -> String? {
+    /// 失败就留在排序态，draft 原封不动，用户可以直接再按一次「完成」重试）。
+    ///
+    /// **冲突检测**：`baseline` 是进入排序态时的 store.items 扁平 id 序列。完成时如果当前 items
+    /// 的 id 序列 ≠ baseline（表示期间有 import 等并发更新），拒绝此次 PUT 并返回
+    /// 「列表已在别处更新，请重新调整顺序」，让视图保留排序态供用户重新理。
+    ///
+    /// 同一套 snapshot/`isMutating` 纪律（见 `delete` 上的长注释）。
+    /// nil = 成功；非 nil = 给用户看的错误文案。
+    func applyReorder(_ newItems: [PromptNode], baseline: [String]) async -> String? {
         guard !isMutating else { return nil }
+        // 冲突检测：baseline 是进入排序前的 id 序列，现在的 items 序列应该完全相同（排序只改顺序不改内容）
+        if PromptLogic.flattenIDs(items) != baseline {
+            return String(localized: "列表已在别处更新，请重新调整顺序")
+        }
         let snapshot = items
         isMutating = true
         items = newItems

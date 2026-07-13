@@ -435,7 +435,20 @@ final class PromptStoreTests: XCTestCase {
         ]
         XCTAssertNil(PromptLogic.movingIntoGroup(items, actionID: "does-not-exist", groupID: "g"))
         XCTAssertNil(PromptLogic.movingIntoGroup(items, actionID: "a", groupID: "does-not-exist"))
-        XCTAssertNil(PromptLogic.movingIntoGroup(items, actionID: "a", groupID: "a"), "target must actually be a group")
+        // 两级封顶：dragging group into another group must return nil（不能嵌套 group）
+        let twoGroups = [
+            PromptNode(id: "g1", type: "group", label: "组1", origin: "user", children: []),
+            PromptNode(id: "g2", type: "group", label: "组2", origin: "user", children: []),
+        ]
+        XCTAssertNil(PromptLogic.movingIntoGroup(twoGroups, actionID: "g1", groupID: "g2"), "dragging a group into another group should fail two-level cap")
+    }
+
+    /// 自 drop（actionID == groupID）的单独验证——两个几乎同时的删除实验中被代码分离出来的护卫。
+    func testMovingIntoGroupSelfDropReturnsNil() {
+        let items = [
+            PromptNode(id: "a", type: "action", label: "A", origin: "user", prompt: "p", appliesTo: ["text"]),
+        ]
+        XCTAssertNil(PromptLogic.movingIntoGroup(items, actionID: "a", groupID: "a"), "self drop (actionID == groupID) must be rejected")
     }
 
     func testMovingOutOfGroupAppendsToTopLevel() {

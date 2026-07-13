@@ -42,8 +42,8 @@ import UIKit
 //    拖动没有公开 API 暴露「当前是哪一行在被拖」，做不到逐行反馈；只有 .draggable 那条跨组
 //    拖拽路径能拿到真实的拖动预览（`reorderDragPreview`，做了同款的白底+琥珀边+投影）。
 // 2) List 在 onMove 生效时会在行尾自动画一个系统own的三横线拖动手柄（灰色，位置/颜色不可改）；
-//    我们按设计稿在行首另画了一个 `line.3.horizontal`（`#C9C0B1`）——所以排序态每行会有两个
-//    手柄图标（系统一个在右，我们画的一个在左），这是保留 onMove 功能的必然代价。
+//    系统手柄是真正的拖动交互入口（trailing），行体上的 .draggable 处理跨组拖拽。
+//    之前的自定义 leading 手柄已删除（false affordance，交互没有绑定）。
 // 3) 卡片整体的 1px 描边（`Theme.borderChrome`）在 List 行拼接下没有做（每行独立描边会在行与
 //    行之间露缝）——只做了首行顶部圆角/末行底部圆角 + 发丝分隔线，视觉上仍是「一张白卡」，
 //    只是没有外描边和整卡投影。
@@ -61,8 +61,7 @@ struct PromptManagerView: View {
     /// 才 push 编辑页，避免 sheet 收起动画和 push 动画打架。
     @State private var pendingNewActionDraft: PromptNode?
     @State private var newActionDraft: PromptNode?
-    /// 长按分组行「重命名」→ push 编辑页（分组没有独立的编辑入口，复用同一个
-    /// contextMenu 添加；PromptEditView 对 group 只画名字字段，改名系统 group 会 fork）。
+    /// 分组行左滑「重命名」→ push 编辑页（分组没有独立的编辑入口；PromptEditView 对 group 只画名字字段，改名系统 group 会 fork）。
     @State private var renameTarget: PromptNode?
     /// Task 7：动作行点击进编辑页——原来是 `NavigationLink`，放进 List 后会带出系统 disclosure
     /// chevron，改成 Button + item-based `.navigationDestination`（和 renameTarget 同一个模式）。
@@ -79,6 +78,8 @@ struct PromptManagerView: View {
     /// 进入排序态前的展开集合，退出时（无论完成还是取消）恢复，排序态自己的展开/收起
     /// 不污染正常浏览态。
     @State private var savedExpandedGroups: Set<String> = []
+    /// 进入排序态时的 store.items 扁平 id 序列——用于检测期间的并发 import/深链更新。
+    @State private var reorderBaseline: [String] = []
     @State private var showCancelConfirm = false
     /// 跨组拖拽实时高亮：当前正被拖拽悬停的分组行 id（`.dropDestination` 的 isTargeted 回调）。
     @State private var targetedGroupID: String?
@@ -432,18 +433,11 @@ struct PromptManagerView: View {
         }
     }
 
-    private var dragHandle: some View {
-        Image(systemName: "line.3.horizontal")
-            .font(.system(size: 13))
-            .foregroundStyle(Color(hex: "C9C0B1"))
-            .frame(width: 20)
-    }
 
     private func reorderGroupRow(_ node: PromptNode) -> some View {
         let expanded = expandedGroups.contains(node.id)
         let isTargeted = targetedGroupID == node.id
         return HStack(spacing: 12) {
-            dragHandle
             iconTile(bg: Theme.tileNeutral, symbol: "folder", fg: Theme.secondary)
             HStack(spacing: 6) {
                 Text(node.label).font(.system(size: 15)).foregroundStyle(Theme.ink)
@@ -484,7 +478,6 @@ struct PromptManagerView: View {
 
     private func reorderActionRow(_ node: PromptNode) -> some View {
         HStack(alignment: .top, spacing: 12) {
-            dragHandle
             actionTile(node)
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
@@ -506,7 +499,6 @@ struct PromptManagerView: View {
     /// drop target）复杂度明显更高，这里用 swipe 做保真度取舍（文件头长注释已记录）。
     private func reorderChildRow(_ node: PromptNode) -> some View {
         HStack(alignment: .top, spacing: 12) {
-            dragHandle
             actionTile(node)
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
@@ -552,6 +544,7 @@ struct PromptManagerView: View {
         guard !reordering, !store.isMutating else { return }
         savedExpandedGroups = expandedGroups
         draft = store.items
+        reorderBaseline = PromptLogic.flattenIDs(store.items)
         expandedGroups = []
         reordering = true
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
@@ -571,14 +564,16 @@ struct PromptManagerView: View {
         reordering = false
     }
 
-    /// 「完成」→ 一次 store.applyReorder(draft) 整树 PUT。失败：store 内部已经把
+    /// 「完成」→ 一次 store.applyReorder(draft, baseline:) 整树 PUT。失败：store 内部已经把
     /// `store.items` 回滚到排序前的快照，但这里**继续留在排序态、draft 原样不动**——
     /// 用户刚花力气摆好的顺序不因为一次网络失败就白干，toast 提示后可以直接再按一次
     /// 「完成」重试。成功才退出排序态（恢复排序前的展开集合）。
+    /// 冲突检测：如果期间有并发 import/深链更新，baseline 校验拒绝此次 PUT 并返回"已在别处更新"，
+    /// 用户刷新列表重新调整。
     private func commitReorder() {
         guard !store.isMutating else { return }
         Task {
-            if let err = await store.applyReorder(draft) {
+            if let err = await store.applyReorder(draft, baseline: reorderBaseline) {
                 showToast(String(localized: "保存失败，已恢复（\(err)）"))
             } else {
                 expandedGroups = savedExpandedGroups
