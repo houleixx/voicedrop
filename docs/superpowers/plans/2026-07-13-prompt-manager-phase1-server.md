@@ -657,6 +657,26 @@ Expected: FAIL — `validateList is not a function`
 
 - [ ] **Step 3: 实现 `validateList`**
 
+> ⚠️ **加固要求（下面的参考代码是骨架，这四条必须做到，缺一条就是可利用的洞）。**
+> 这是**唯一**挡在恶意客户端和 R2 存储之间的东西，它收的是 `JSON.parse` 的原始产物。
+>
+> 1. **`validateList` 必须是 total —— 任何 JSON 输入都只返回 `string|null`，绝不 throw。**
+>    校验器一抛，本该的 400 就变成 500。外面套一层 `try/catch` 兜底。
+> 2. **`children` 存在时必须是数组。** `for (const c of node.children || [])` 遇到 `children:{}`
+>    会抛 `TypeError`（`{}` 是 truthy 但不可迭代）。`children: 5` / `true` 同理。
+> 3. **长度量的是【原串】，不是 trim 后的。** `label` 用 `node.label.length`，否则
+>    `" ".repeat(10000)+"A"` 直接绕过 40 字上限。（`prompt` 的检查本来就是对的，照它写。）
+> 4. **字段白名单（spec §3「有 `ref` 就没有其他内容字段」）。** 白名单外的键一律拒绝：
+>    - ref-to-action：`{ref}`；ref-to-group：`{ref, children}`
+>    - 实体 action：`{id, type, label, prompt, appliesTo, kind, imageParams, forkedFrom}`
+>    - 实体 group：`{id, type, label, children, forkedFrom}`
+>
+>    没有白名单，**200 条上限根本不是体积上限**——单条塞一个 5MB 的陌生键名就整包进了存储
+>    （`{ref:"sys_cartoon", notChildren:"X".repeat(5e6)}` 会通过）。有了白名单，最坏情况
+>    ≈ 200 × (40 label + 4000 prompt) ≈ 800KB，够用了，**不用再加单独的字节上限**。
+>
+> 白名单同时也顺手封死了「action 挂 children」这个走私通道（`children` 不在 action 的白名单里）。
+
 追加到 `agent/src/prompts.js`：
 
 ```js
@@ -666,6 +686,12 @@ export const MAX_LABEL = 40;
 export const MAX_PROMPT = 4000;
 const USER_ID_RE = /^p_[a-z0-9]{6,}$/;
 const APPLIES = new Set(["text", "image"]);
+
+// 字段白名单 —— 见上面「加固要求 4」。
+const REF_ACTION_KEYS = new Set(["ref"]);
+const REF_GROUP_KEYS = new Set(["ref", "children"]);
+const ENTITY_ACTION_KEYS = new Set(["id", "type", "label", "prompt", "appliesTo", "kind", "imageParams", "forkedFrom"]);
+const ENTITY_GROUP_KEYS = new Set(["id", "type", "label", "children", "forkedFrom"]);
 
 /// 返回错误信息字符串（→ 400 body）或 null（通过）。
 export function validateList(template, items) {
