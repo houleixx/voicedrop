@@ -208,7 +208,48 @@ final class PromptStoreTests: XCTestCase {
         XCTAssertEqual(forked.children?.map(\.id), ["sys_cartoon", "sys_ad"])
     }
 
+    // MARK: - fork regression tests (Task 5: view-layer fork gating)
+
+    /// Task 5 regression: fork applied then fields-restored doesn't produce node equal to original.
+    /// Documenting that fork decision must happen at view layer only when values genuinely differ.
+    func testForkIsNeverEqualToOriginal_soViewMustGateOnValueDiff() {
+        let original = PromptNode(id: "sys_concise", type: "action", label: "更简洁", origin: "system",
+                                   prompt: "把这段改简洁", appliesTo: ["text"], kind: "rewrite")
+        var edited = original
+        // Apply all edits
+        edited.label = "更简洁一点"
+        edited.prompt = "把这段改得更简洁"
+        edited.appliesTo = ["text", "image"]
+
+        let forked = PromptLogic.fork(edited)
+
+        // Restore edited fields to original values
+        var restored = forked
+        restored.label = original.label
+        restored.prompt = original.prompt
+        restored.appliesTo = original.appliesTo
+
+        // Fork id is different, so restored != original (fork decision must happen in view layer only)
+        XCTAssertNotEqual(restored.id, original.id, "fork must produce a different id that persists even after field restoration")
+        XCTAssertNotEqual(restored, original, "restored forked node must not equal original (different ids prove fork cannot be rolled back at view layer)")
+    }
+
     // MARK: - replacing（Task 5：fork-on-edit / 系统 group 改名的原位替换，PromptStore.replace 用）
+
+    func testReplacingWithIdenticalNodeStillSwapsById() {
+        let original = PromptNode(id: "sys_a", type: "action", label: "A", origin: "system", prompt: "p", appliesTo: ["text"])
+        let items = [
+            original,
+            PromptNode(id: "b", type: "action", label: "B", origin: "user", prompt: "p", appliesTo: ["text"]),
+        ]
+        // Forking the identical node produces new id but keeps all field values same
+        let forked = PromptLogic.fork(original)
+        let result = PromptLogic.replacing(items, id: "sys_a", with: forked)
+        XCTAssertEqual(result.map(\.id), [forked.id, "b"], "replacing should swap by id even with identical field values")
+        XCTAssertEqual(result[0].label, "A")
+        XCTAssertEqual(result[0].prompt, "p")
+        XCTAssertNotEqual(result[0].id, "sys_a", "replaced node should have new id from fork")
+    }
 
     func testReplacingTopLevelNodeSwapsInPlaceEvenWithDifferentId() {
         let items = [

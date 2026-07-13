@@ -83,10 +83,23 @@ struct PromptEditView: View {
 
     private var canSave: Bool {
         guard node != nil else { return false }
-        if isCreate {
-            return !nameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                && !promptDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+
+        // Always require non-empty trimmed name (both create and edit modes)
+        let nameTrimmed = nameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !nameTrimmed.isEmpty else { return false }
+
+        // For actions (not groups), also require non-empty trimmed prompt (both create and edit modes)
+        if !isGroup {
+            let promptTrimmed = promptDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !promptTrimmed.isEmpty else { return false }
         }
+
+        // In create mode, the checks above are sufficient
+        if isCreate {
+            return true
+        }
+
+        // In edit mode, additionally require dirty
         return dirty
     }
 
@@ -127,7 +140,7 @@ struct PromptEditView: View {
     private var header: some View {
         HStack(spacing: 14) {
             NavSquare(systemName: "chevron.left", size: 36) { dismiss() }
-            Text((node?.label.isEmpty ?? true) ? String(localized: "提示词") : node!.label)
+            Text((node?.label.isEmpty ?? true) ? String(localized: "提示词") : (node?.label ?? ""))
                 .font(.system(size: 19, weight: .semibold))
                 .foregroundStyle(Theme.ink).lineLimit(1)
             Spacer()
@@ -148,7 +161,7 @@ struct PromptEditView: View {
             }
         }
         .background(canSave ? Theme.accent : Theme.faint, in: RoundedRectangle(cornerRadius: 9))
-        .disabled(!canSave || saving || store.isMutating)
+        .disabled(!canSave || saving || store.isMutating || shareToggling)
     }
 
     // MARK: - 字段
@@ -253,10 +266,14 @@ struct PromptEditView: View {
         saving = true
         defer { saving = false }
 
+        // Trim fields before building the node to save
+        let trimmedName = nameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedPrompt = promptDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+
         if isCreate {
             var newNode = node
-            newNode.label = nameDraft
-            newNode.prompt = promptDraft
+            newNode.label = trimmedName
+            newNode.prompt = trimmedPrompt
             newNode.appliesTo = orderedAppliesTo
             guard let err = await store.add(newNode) else { dismiss(); return }
             showToast(err)
@@ -264,9 +281,9 @@ struct PromptEditView: View {
         }
 
         var edited = node
-        edited.label = nameDraft
+        edited.label = trimmedName
         if !isGroup {
-            edited.prompt = promptDraft
+            edited.prompt = trimmedPrompt
             edited.appliesTo = orderedAppliesTo
         }
         // origin=="system" 的项一旦 dirty 保存 → 客户端实体化（fork）：新 p_ id +
@@ -304,6 +321,7 @@ struct PromptEditView: View {
                         Task { await toggleSharing(on) }
                     }))
                     .labelsHidden().tint(Theme.accent)
+                    .disabled(saving || store.isMutating)
                 }
             }
             if let err = shareError {
