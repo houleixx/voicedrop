@@ -1,6 +1,25 @@
 # VoiceDrop — project state (read this first)
 
-Last updated: 2026-07-13（服务端已部署 + 本 repo 主界面切轻量接口）
+Last updated: 2026-07-14（键盘精修已 revert）
+
+## ⚠️ 已撤销：键盘精修（长按段落就地编辑，2026-07-14 当天上线当天 revert）
+
+按 `~/Downloads/design_handoff_paragraph_edit` 方向 1a 做的 inline 段落键盘编辑
+（长按菜单「编辑」→ 段落变输入框 → UITextView tap-to-caret + inputAccessoryView）
+经 PR #9 合入、TestFlight build 241 发出后，用户真机实测**错误百出，整体 revert**
+（revert commit `50bd5b0`，触发了新的 TestFlight 构建顶掉 241）。
+**没有逐条排查具体 bug**——用户直接拍板撤销，具体哪里坏的没有记录。
+
+- 别在没有用户明确要求时重新引入这个功能。
+- 如果重做：完整实现和调研结论存档在被 revert 的 commit `cc13560`（分支
+  `worktree-voicedrop+paragraph-edit-1a` 仍在 origin 上）和
+  `~/code/jianshuo-memory/08-infrastructure/voicedrop-paragraph-keyboard-edit.md`。
+  其中仍然有效的服务端结论：`PUT /files/api/articles/<stem>`（writeArticleDoc）
+  是不经 LLM、自动铸版本的通用写入口；客户端 `ArticleDoc` 模型没建模
+  `schema`/`status`/`model` 等字段，整 struct 重编码回传会丢字段，必须在原始
+  JSON dict 上只 merge 要改的 key。
+- 教训与 2026-07-12「实时预览 UI 已撤销」同款：自绘手势 + UIKit 桥接的交互，
+  模拟器/单测全绿≠能用，**必须真机手测过再合并发 TestFlight**，不要合并后等用户当小白鼠。
 
 ## 性能改造第二轮（2026-07-13，API 速度体检后落地）
 
