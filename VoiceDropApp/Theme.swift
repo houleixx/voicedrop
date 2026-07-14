@@ -86,6 +86,11 @@ enum Theme {
         static let recordInner: CGFloat = 6
         static let primary: CGFloat = 8
         static let tile: CGFloat = 8
+        /// Prompt Manager 编辑态（第 6 轮拖拽）行内图标块专属半径——正常态仍用 `tile`(8)；
+        /// 编辑态顶层行（30×30）用 7、组内子行（26×26）用 6，对齐设计稿，见
+        /// PromptManagerView 的 editGroupRow/editActionRow/editChildRow。
+        static let promptEditTile: CGFloat = 7
+        static let promptEditChildTile: CGFloat = 6
     }
 }
 

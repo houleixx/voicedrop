@@ -33,12 +33,27 @@ import UIKit
 // （`RowFrame`）经 `RowFramePreferenceKey` 收进 `rowFrames`（命名坐标空间 `editCoordSpace`）。
 // ≡ 手柄（唯一的拖动发起点）挂 `DragGesture(minimumDistance: 2, coordinateSpace: .named(...))`：
 // `onChanged` 里把当前手指 Y 喂给 `PromptDragEngine.dropIndex`，算出的 `DropTarget` 变了就
-// `withAnimation(.easeOut(duration: 0.15))` 更新；被拖的那一行整个从渲染流里摘掉（`editRows()`
-// 直接跳过它，不留 opacity-0 占位——唯一的"占位"是当前 `DropTarget` 对应位置插入的 44pt
-// 缝隙），浮起的视觉在 `.overlay` 里跟着 `translation` 走。松手（`onEnded`）→
-// `PromptDragEngine.apply` 落到 `draft`，清空拖拽状态。
+// `withAnimation(.easeOut(duration: 0.15))` 更新；浮起的视觉在 `.overlay` 里跟着 `translation`
+// 走。松手（`onEnded`）→ `PromptDragEngine.apply` 落到 `draft`，清空拖拽状态。
+//
+// **⚠️ 身份修复（review 后补，2026-07-14）**：被拖的那一行**留在 `ForEach` 里、保持同一个
+// id**——早先的实现把它整个从 `editRows()` 摘掉，等于让 SwiftUI 在触摸中途销毁承载
+// `DragGesture` 的那个视图，手势（含 `onEnded`）可能死在半路：浮层永远收不回、其它行永远
+// 停在 0.9 透明度、`editDrag` 悬空——下一次在别的行上开始的拖动会把新坐标写进这个残留
+// 状态，视觉上挪的是错的那一行。现在改成"留位置但收起"：`.frame(height: isRowCollapsed ?
+// 0 : nil).clipped().opacity(...)`，布局照样"收拢"，视图身份和手势活下来；折叠的行同时
+// 不再经 `rowFramePublisher` 发布帧（0 高度的帧会污染 `dropIndex` 的组跨度判定），
+// `editRows()` 里的缝隙插入位置相应换算成"跳过折叠行之后数到第几个"（`insertionIndex`）。
+// 另外两层防御：① 手柄手势的 `onChanged` 发现 `editDrag` 属于别的行 id 时视为全新拖动，
+// 立刻重置而不是往旧状态里写坐标（`dragGesture`）；② `scenePhase` 离开 `.active` 时兜底清空
+// （`body` 的 `onChange`）。`cancelReorder`/`commitReorder`/`exitReorderDiscarding` 早就会
+// 清 `editDrag`/`dropTarget`，原样保留。
 struct PromptManagerView: View {
     @Environment(\.dismiss) private var dismiss
+    /// 安全网第三层：切后台/锁屏等场景离开 active 时清空拖拽态（见 body 里的 onChange）——
+    /// 万一某次 onEnded 真没触发（系统中断等边界情况，正常路径已被下面两层挡住），
+    /// 不留一个悬空的 EditDragState 卡住浮层或污染下一次拖动。
+    @Environment(\.scenePhase) private var scenePhase
     @State private var store = PromptStore.shared
     @State private var expandedGroups: Set<String> = []
     @State private var deleteTarget: PromptNode?
@@ -91,6 +106,11 @@ struct PromptManagerView: View {
             }
         }
         .background(Theme.appBG.ignoresSafeArea())
+        .onChange(of: scenePhase) { _, phase in
+            guard phase != .active else { return }
+            editDrag = nil
+            dropTarget = .none
+        }
         .overlay(alignment: .bottom) { toastView }
         .toolbar(.hidden, for: .navigationBar)
         .task { await store.refresh() }
@@ -425,25 +445,22 @@ struct PromptManagerView: View {
         }
     }
 
-    /// 编辑态当前应渲染的行序列：被拖的那一行整个从流里摘除（跟手的浮层已经在 overlay 里
-    /// 画着它），当前 `dropTarget` 若是 `.reorder`，在对应 scope 里插入一个 44pt 缝隙占位；
+    /// 编辑态当前应渲染的行序列：被拖的那一行（连同——如果拖的是展开着的 folder 标题——它
+    /// 露出来的孤儿子行）**留在数组里**（身份修复，见文件头长注释），渲染时靠 `isRowCollapsed`
+    /// 收成 0 高度；当前 `dropTarget` 若是 `.reorder`，在对应 scope 里插入一个 44pt 缝隙占位。
     /// `.intoGroup`/`.outOfGroup`/`.none` 不出缝隙——folder 张口 / 移出区是 Task 2 的活，
     /// Task 1 阶段悬停在这些落点上时列表就正常收拢，松手也不生效。
     private func editRows() -> [EditRow] {
         var topLevelChunks: [[EditRow]] = []
 
         for node in draft {
-            if node.id == editDrag?.id { continue } // 被拖的顶层项（action 或 group）整体隐去
             if node.type == "group" {
                 var chunk: [EditRow] = [.group(node)]
                 if expandedGroups.contains(node.id) {
-                    var children: [EditRow] = []
-                    for child in node.children ?? [] {
-                        if child.id == editDrag?.id { continue } // 被拖的组内子项隐去
-                        children.append(.child(child, parent: node.id))
-                    }
+                    var children: [EditRow] = (node.children ?? []).map { .child($0, parent: node.id) }
                     if case .reorder(let index, let scope) = dropTarget, scope == .group(node.id) {
-                        children.insert(.gap, at: min(max(index, 0), children.count))
+                        let insertAt = insertionIndex(in: children, target: max(index, 0), isCollapsed: isRowCollapsed)
+                        children.insert(.gap, at: insertAt)
                     }
                     chunk += children
                 }
@@ -454,11 +471,45 @@ struct PromptManagerView: View {
         }
 
         if case .reorder(let index, .topLevel) = dropTarget {
-            let insertAt = min(max(index, 0), topLevelChunks.count)
+            let insertAt = insertionIndex(in: topLevelChunks, target: max(index, 0)) { chunk in
+                chunk.first.map(isRowCollapsed) ?? false
+            }
             topLevelChunks.insert([.gap], at: insertAt)
         }
 
         return topLevelChunks.flatMap { $0 }
+    }
+
+    /// 折叠判定——被拖的那一行本身，或者（拖的是某个展开着的 folder 标题时）它名下的子行：
+    /// 之前整块从流里摘掉，现在只让承载手势的那一行留在树里，若不连带把孤儿子行也一起收起，
+    /// 会出现"标题飞在浮层里、没头的子行还占着位置"。用同一份判定同时喂
+    /// `rowFramePublisher`（折叠的行不发布帧，0 高度的帧不该进 `dropIndex` 的几何计算）。
+    private func isCollapsed(id: String, kind: RowFrame.Kind) -> Bool {
+        guard let draggedID = editDrag?.id else { return false }
+        if id == draggedID { return true }
+        if case .child(let parent) = kind, parent == draggedID { return true }
+        return false
+    }
+
+    private func isRowCollapsed(_ row: EditRow) -> Bool {
+        switch row {
+        case .group(let n): return isCollapsed(id: n.id, kind: .groupTitle)
+        case .action(let n): return isCollapsed(id: n.id, kind: .action)
+        case .child(let n, let parent): return isCollapsed(id: n.id, kind: .child(parent: parent))
+        case .gap: return false
+        }
+    }
+
+    /// `PromptDragEngine.dropIndex` 给出的 index 是"排除被拖（含折叠）元素后，插入到第几个
+    /// 可见元素之前"；被拖元素现在仍留在数组里撑住视图身份，这里把 index 换算回真实数组
+    /// 下标——从头数，跳过折叠元素，数到第 index 个可见元素时就是插入点，数不够则插到最后。
+    private func insertionIndex<T>(in elements: [T], target index: Int, isCollapsed: (T) -> Bool) -> Int {
+        var seen = 0
+        for (i, element) in elements.enumerated() where !isCollapsed(element) {
+            if seen == index { return i }
+            seen += 1
+        }
+        return elements.count
     }
 
     private var editList: some View {
@@ -468,6 +519,7 @@ struct PromptManagerView: View {
                 if isGapRow(row) {
                     dropGapView
                 } else {
+                    let collapsed = isRowCollapsed(row)
                     let isFirst = i == 0 || isGapRow(rows[i - 1])
                     let isLast = i == rows.count - 1 || isGapRow(rows[i + 1])
                     editRowContent(row)
@@ -478,10 +530,15 @@ struct PromptManagerView: View {
                                 Rectangle().fill(Theme.dividerInCard).frame(height: 1)
                             }
                         }
+                        // 身份修复：被拖（或孤儿子）行留在树里，靠 0 高度 + clipped + opacity 0
+                        // 视觉收起——"收拢"的布局效果不变，但视图身份/手势活着（见文件头长注释）。
+                        .frame(height: collapsed ? 0 : nil)
+                        .clipped()
+                        .opacity(collapsed ? 0 : 1)
                 }
             }
         }
-        .opacity(editDrag == nil ? 1 : 0.9) // 6b：拖动中其余行 opacity 0.9（被拖行已从流中摘除，不在这些行里）
+        .opacity(editDrag == nil ? 1 : 0.9) // 6b：拖动中其余行 opacity 0.9
         .coordinateSpace(name: editCoordSpace)
         .overlay(alignment: .topLeading) { floatingDragOverlay }
         .onPreferenceChange(RowFramePreferenceKey.self) { rowFrames = $0 }
@@ -512,7 +569,7 @@ struct PromptManagerView: View {
                 .frame(width: 30, height: 44)
                 .contentShape(Rectangle())
                 .gesture(dragGesture(for: node.id, kind: .groupTitle, label: node.label, symbol: "folder"))
-            RoundedRectangle(cornerRadius: Theme.R.tile)
+            RoundedRectangle(cornerRadius: Theme.R.promptEditTile)
                 .fill(Theme.tileNeutral)
                 .frame(width: 30, height: 30)
                 .overlay(Image(systemName: "folder").font(.system(size: 13)).foregroundStyle(Color(hex: "7A6E5C")))
@@ -544,7 +601,7 @@ struct PromptManagerView: View {
                 .frame(width: 30, height: 44)
                 .contentShape(Rectangle())
                 .gesture(dragGesture(for: node.id, kind: .action, label: node.label, symbol: actionSymbol(node)))
-            actionTile(node)
+            actionTile(node, cornerRadius: Theme.R.promptEditTile)
             Text(node.label).font(.system(size: 15)).foregroundStyle(Theme.ink)
             Spacer(minLength: 8)
         }
@@ -565,7 +622,7 @@ struct PromptManagerView: View {
             iconTile(bg: isImageOnly(node) ? Theme.accentSoft : Theme.tileNeutral,
                      symbol: actionSymbol(node),
                      fg: isImageOnly(node) ? Theme.accent : Theme.secondary,
-                     size: 26, iconSize: 12)
+                     size: 26, iconSize: 12, cornerRadius: Theme.R.promptEditChildTile)
             Text(node.label).font(.system(size: 14.5)).foregroundStyle(Theme.ink)
             Spacer(minLength: 8)
         }
@@ -579,10 +636,15 @@ struct PromptManagerView: View {
             .foregroundStyle(active ? Color(hex: "D8A25B") : Color(hex: "C9C0B1"))
     }
 
+    /// 折叠（被拖/孤儿子行）时不发布帧——0 高度的帧一旦被 `PromptDragEngine.dropIndex` 读到
+    /// 会污染组跨度（`groupRows` 的 minY/maxY）等几何判定；起点帧在拖动开始那一刻已经从
+    /// `rowFrames` 里取过一次快照（`dragGesture`），后续折叠不再更新它不影响浮层跟手。
     private func rowFramePublisher(id: String, kind: RowFrame.Kind) -> some View {
         GeometryReader { geo in
-            Color.clear.preference(key: RowFramePreferenceKey.self,
-                                    value: [RowFrame(id: id, frame: geo.frame(in: .named(editCoordSpace)), kind: kind)])
+            Color.clear.preference(
+                key: RowFramePreferenceKey.self,
+                value: isCollapsed(id: id, kind: kind) ? [] : [RowFrame(id: id, frame: geo.frame(in: .named(editCoordSpace)), kind: kind)]
+            )
         }
     }
 
@@ -633,6 +695,14 @@ struct PromptManagerView: View {
     private func dragGesture(for id: String, kind: RowFrame.Kind, label: String, symbol: String) -> some Gesture {
         DragGesture(minimumDistance: 2, coordinateSpace: .named(editCoordSpace))
             .onChanged { value in
+                // 接管守卫（安全网第二层）：身份修复后正常情况下不会走到这——但万一某次
+                // onEnded 真没触发（系统中断等边界情况），残留的 editDrag 属于别的行时，
+                // 这次触摸必须当全新拖动处理，绝不把新坐标写进那份陈旧状态（否则视觉上会
+                // 挪动错误的那一行）。
+                if editDrag != nil && editDrag?.id != id {
+                    editDrag = nil
+                    dropTarget = .none
+                }
                 if editDrag == nil {
                     guard let origin = rowFrames.first(where: { $0.id == id })?.frame else { return }
                     editDrag = EditDragState(id: id, kind: kind, label: label, symbol: symbol, originFrame: origin)
@@ -718,18 +788,21 @@ struct PromptManagerView: View {
 
     // MARK: - 图标块 / 标
 
-    private func iconTile(bg: Color, symbol: String, fg: Color, size: CGFloat = 34, iconSize: CGFloat = 14) -> some View {
-        RoundedRectangle(cornerRadius: Theme.R.tile)
+    private func iconTile(bg: Color, symbol: String, fg: Color, size: CGFloat = 34, iconSize: CGFloat = 14, cornerRadius: CGFloat = Theme.R.tile) -> some View {
+        RoundedRectangle(cornerRadius: cornerRadius)
             .fill(bg)
             .frame(width: size, height: size)
             .overlay(Image(systemName: symbol).font(.system(size: iconSize)).foregroundStyle(fg))
     }
 
     /// 图标按内容挑：只适用于图片的动作用 photo/赭红，其余（仅文字或都行）用 text.quote/中性灰。
-    private func actionTile(_ node: PromptNode) -> some View {
+    /// `cornerRadius` 可选覆盖——正常态调用不传，维持 `Theme.R.tile`(8)；编辑态行
+    /// （editActionRow）传 `Theme.R.promptEditTile`(7)，对齐 editGroupRow 的 folder 图标。
+    private func actionTile(_ node: PromptNode, cornerRadius: CGFloat = Theme.R.tile) -> some View {
         iconTile(bg: isImageOnly(node) ? Theme.accentSoft : Theme.tileNeutral,
                   symbol: isImageOnly(node) ? "photo" : "text.quote",
-                  fg: isImageOnly(node) ? Theme.accent : Theme.secondary)
+                  fg: isImageOnly(node) ? Theme.accent : Theme.secondary,
+                  cornerRadius: cornerRadius)
     }
 
     @ViewBuilder private func originBadge(_ origin: String) -> some View {
