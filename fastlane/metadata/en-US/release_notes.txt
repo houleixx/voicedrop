@@ -1,6 +1,7 @@
 What's new:
-• Invite friends: share your invite link and you both earn credits when they join
-• Share links open right in the app — tap a community post or a friend's share and jump straight in
-• More reliable AI cover images: fixed covers stuck on "generating", and images you've seen now load instantly
-• The AI interviewer listens better — fixed it occasionally talking over you
-• Tap an "article ready" notification and land directly on the finished article
+• All-new Prompt Manager: customize how your articles are written — organize prompts into groups, drag to reorder, and import prompts shared by friends in one tap
+• Live preview for voice edits: watch rewrites and insertions appear right in the article as they generate — no more waiting on a spinner
+• Long-press any paragraph to edit it in place with the keyboard, layout untouched
+• Redesigned community feed: two-column cards with For You / Latest / Replies tabs
+• Faster everywhere: the recording list opens instantly and cover thumbnails load much quicker
+• Photos imported from your library keep their original aspect ratio
