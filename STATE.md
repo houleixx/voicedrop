@@ -38,6 +38,14 @@ kind=article、匿名 403、新 MCP 工具可用。iOS 4 个 commit 已合 main 
   kind=prompt && promptCode && !mine，走 PromptStore.shared.importPrompt）；
   PromptEditView 开关文案改「分享到社区」，403 拉起 Apple 登录重试一次
   （二次拒绝返回可见错误，不伪装成功——review 抓的竞态）。
+- **真机首测后的修复轮（2026-07-16，四个包：a095346/32067ff/09e575d/470227c + 服务端两轮提速）**：
+  ① feed 行映射漏 kind →「提示词」tab 恒空（FeedRow→CommunityPost 手工映射，**加字段
+  必须三处同步**，代码里有警示注释）；② 分享失败文案按服务端错误码映射（笼统「操作失败」
+  掩盖过 413/审核/401 排障）；③ 提示词帖详情页对齐落地页形态（分享码+内容盒+怎么用——
+  合成 articles 只是老 App 降级，不是新版展示）；④ 开关闪烁 = 先放开 toggle 再刷状态的
+  时序反了；⑤ **开分享 10 秒 = 15 个串行存储操作积垢**（必需仅 5：读树/读索引/验码/写索引/
+  写副本；3 个读的是生产不存在的运营配置；发帖四连挪 waitUntil；黑名单预取并行+首铸跳
+  importCount 保护读）——关键路径现 ~3 个来回。教训：每个功能各加一两跳没人算总账。
 - **⚠️ token 坑（2026-07-16 真机 bug，a095346 修）**：`AuthStore.bearer` **永远是
   anonToken**（Apple 登录后也不变），登录证明在 `AuthStore.shared.session`（JWT）。
   任何要过「可追责身份」门槛的请求（社区写、prompt-share）必须送 `session ?? bearer`
