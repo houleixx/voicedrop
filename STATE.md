@@ -1,6 +1,37 @@
 # VoiceDrop — project state (read this first)
 
-Last updated: 2026-07-16（投喂到账 APNs 推送 + voicedrop://usage 深链上线）
+Last updated: 2026-07-16（邀请好友入口 + voicedrop.cn/i/<码> 落地页上线）
+
+## 邀请好友：设置页入口 + 邀请落地页（2026-07-16，服务端已部署，iOS 已合 main 未发 TestFlight）
+
+referral 二期（补掉 2026-07-09 遗留 ④「主动邀请入口」）。设计稿 = claude.ai/design 项目
+`Settings.dc.html`（邀请行）+ `Invite.dc.html`（分享 sheet 1b / 落地页 1c）。
+
+- **邀请码一码两用**：码 = anon sub 前 6 位 hex 大写 ＝ App 设置页显示的账户短码
+  （`inviteCodeForScope`，撞码退 10/16 位；非 anon scope 走 sha256 派生）。注册表
+  R2 `invites/<码>` = `{owner, name, ts}`，name 每次取链接时从 CLAUDE.json profile 刷新
+  （改名传导到落地页）。
+- **服务端**（jianshuo.dev repo，worker 423081cc + Pages b83a98d3 已上线冒烟）：
+  ① `GET /agent/referral/link`（anon/session 均可）→ `{code, url, name, enabled,
+  suanliInviter, suanliFriend}`（奖励 = 面额 × mint-rate 现价，读不到回 0，客户端隐藏数字）；
+  ② 落地页 `functions/voicedrop/i/[code].js`——深色品牌下载页（邀请人行/金色奖励条/
+  三卖点/双下载键 App Store + jianshuo.dev/voicedrop/apk/，UA 弱化非本机端），访问写
+  refhits IP 指纹（归因 2 层）、下载点击写剪贴板（3 层）、大写归一、未知码 404；
+  ③ claim 的 `ownerFromToken` 认 `invites/<码>`——归因三层全部直接复用现有 referral。
+  测试 `agent/test/invite-link.test.js`（17 例）。
+- **iOS**：设置页「账户·算力」卡下加单独一张「邀请好友」卡（SettingsView），副标题/
+  「+N」徽标用现价（`SettingsStore.loadInvite`，0 = 隐藏数字）；点击拉系统分享 sheet
+  （复用 SharePayload/ArticleShareItem——微信目标拿裸 URL 出 og 富卡片，其余拿文本）。
+  `ReferralManager.shareToken` 新认 `voicedrop.cn/i/<码>` 与 `jianshuo.dev/voicedrop/i/<码>`；
+  `AppRouter` 新 DeepLink `.invite(code)`（已装用户点邀请链接 → 记归因第 1 层 → 落 App
+  主页，不看下载页）。单测 `VoiceDropTests/InviteLinkTests.swift`（6 例，全量 112 绿）。
+- **真机手测清单（发 TestFlight 后）**：① 设置页邀请行出现、+N 数字合理 ② 点击弹分享
+  sheet，微信里出「X 邀请你用 VoiceDrop」富卡片 ③ 链接在浏览器开落地页（奖励数字与
+  App 一致）④ 新设备装后首启归因成功（invite 码走 link/剪贴板层）⑤ 已装设备点邀请
+  链接直接进 App 主页。
+- 已知边界：奖励文案「各得」只在双边同额时带数字（当前 9:9）；`enabled:false` 时 App
+  仍显示入口（副标题通用文案）——要藏入口就等 loadInvite 加 gate，有意先不做；新增
+  中文 String Catalog key 等夜间英文同步。
 
 ## 投喂到账推送：文章被投币 → 作者收 APNs，点开进算力账单（2026-07-16）
 

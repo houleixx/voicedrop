@@ -206,6 +206,37 @@ final class SettingsStore {
         } catch {}
     }
 
+    // 邀请好友：GET /agent/referral/link（服务端铸码、写穿 invites/<码>，落地页
+    // voicedrop.cn/i/<码> 归因三层沿用现有 referral 全套）。奖励数字是访问时刻
+    // 现价估算，0 = 现价不可得（界面隐藏数字，只留通用文案）。
+    var inviteURL: URL?
+    var inviteName = ""
+    var inviteRewardInviter = 0
+    var inviteRewardFriend = 0
+    private var inviteLoading = false
+
+    private struct InviteResponse: Decodable {
+        let url: String
+        let name: String?
+        let suanliInviter: Double?
+        let suanliFriend: Double?
+    }
+
+    func loadInvite() async {
+        guard !token.isEmpty, inviteURL == nil, !inviteLoading else { return }
+        inviteLoading = true
+        defer { inviteLoading = false }
+        guard let url = URL(string: "\(API.agentBase.absoluteString)/referral/link") else { return }
+        var req = URLRequest(url: url); req.setBearer(token)
+        if let (data, resp) = try? await URLSession.shared.data(for: req), resp.isOK,
+           let r = try? JSONDecoder().decode(InviteResponse.self, from: data) {
+            inviteURL = URL(string: r.url)
+            inviteName = r.name ?? ""
+            inviteRewardInviter = Int((r.suanliInviter ?? 0).rounded())
+            inviteRewardFriend = Int((r.suanliFriend ?? 0).rounded())
+        }
+    }
+
     var autoShareCommunity = false
 
     private struct AppConfig: Codable { var autoShareCommunity: Bool? }
@@ -376,6 +407,8 @@ struct SettingsView: View {
     @State private var showWechat = false
     @State private var showStyle = false
     @State private var showName = false
+    @State private var invitePayload: SharePayload?
+    @State private var inviteFailed = false
 
     private var shortTag: String {
         let id = AuthStore.shared.anonId          // "anon-7f3a…"
@@ -449,6 +482,27 @@ struct SettingsView: View {
                         }.buttonStyle(.plain)
                     }
 
+                    // 邀请好友 — 单独一张卡，紧挨算力（设计稿 Settings.dc.html）。点开
+                    // 直接拉系统分享 sheet（Invite.dc.html 1b）：微信里出带 og 卡片的
+                    // 邀请链接，落地页 voicedrop.cn/i/<码> 即下载页。
+                    SettingsCard {
+                        Button { shareInvite() } label: {
+                            SettingsRow(tileBG: Theme.accentSoft, symbol: "person.badge.plus", tileFG: Theme.accent,
+                                        title: String(localized: "邀请好友"), subtitle: inviteSubtitle) {
+                                HStack(spacing: 8) {
+                                    if store.inviteRewardInviter > 0 {
+                                        HStack(spacing: 3) {
+                                            Image(systemName: "bolt.fill").font(.system(size: 11))
+                                            Text("+\(store.inviteRewardInviter)")
+                                        }
+                                        .font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.amber)
+                                    }
+                                    settingsChevron
+                                }
+                            }
+                        }.buttonStyle(.plain)
+                    }
+
                     // 写作 — 名字（新）· 写作风格（含成文后追问）· 提示词
                     group(String(localized: "写作")) {
                         SettingsCard {
@@ -511,10 +565,41 @@ struct SettingsView: View {
         }
         .background(Theme.appBG.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
-        .task { await store.load(); await store.loadWechat(); await store.loadConfig(); await store.loadBalance() }
+        .task { await store.load(); await store.loadWechat(); await store.loadConfig(); await store.loadBalance(); await store.loadInvite() }
         .sheet(isPresented: $showWechat) { WechatSettingsSheet(store: store) }
         .sheet(isPresented: $showStyle) { WritingStyleSheet(store: store) }
         .sheet(isPresented: $showName) { NameEditSheet(store: store) }
+        .sheet(item: $invitePayload) { ShareSheet(items: $0.activityItems) }
+        .alert("邀请链接没拿到", isPresented: $inviteFailed) {
+            Button("好") {}
+        } message: {
+            Text("网络不给力，稍后再试一次。")
+        }
+    }
+
+    /// 邀请行副标题：双边同额且现价可得 → 带数字；否则通用文案（绝不编数字）。
+    private var inviteSubtitle: String {
+        let a = store.inviteRewardInviter, b = store.inviteRewardFriend
+        if a > 0 && a == b { return String(localized: "朋友装上，双方各得 \(a) 算力") }
+        return String(localized: "朋友装上，双方都得算力")
+    }
+
+    /// 点「邀请好友」→（必要时先取链接）拉系统分享 sheet。文本给 X/拷贝等目标；
+    /// 微信目标经 ArticleShareItem 拿裸 URL 出富卡片（og 标题 = 「X 邀请你用 VoiceDrop」）。
+    private func shareInvite() {
+        Analytics.capture("邀请好友分享")
+        Task {
+            await store.loadInvite()
+            guard let url = store.inviteURL else { inviteFailed = true; return }
+            let name = store.name.isEmpty ? store.inviteName : store.name
+            let title = name.isEmpty
+                ? String(localized: "邀请你用 VoiceDrop")
+                : String(localized: "\(name) 邀请你用 VoiceDrop")
+            let a = store.inviteRewardInviter, b = store.inviteRewardFriend
+            let reward = (a > 0 && a == b) ? String(localized: "，用这个链接下载咱俩各得 \(a) 算力") : ""
+            let text = String(localized: "我在用 VoiceDrop，动动嘴就能写出好文章\(reward)：\(url.absoluteString)")
+            invitePayload = SharePayload(text: text, url: url, title: title)
+        }
     }
 
     @ViewBuilder private func group<C: View>(_ label: String, @ViewBuilder _ content: () -> C) -> some View {

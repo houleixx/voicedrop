@@ -92,9 +92,12 @@ final class ReferralManager {
         await claim(source: "clipboard", token: id)
     }
 
-    /// 从任意文本里挖分享短链 id：voicedrop.cn/<id> 或 jianshuo.dev/voicedrop/<id>。
+    /// 从任意文本里挖分享短链 id 或邀请码：voicedrop.cn/i/<码>、voicedrop.cn/<id>
+    /// 或 jianshuo.dev/voicedrop[/i]/<id>。邀请码模式在前（更窄先判）。
     static func shareToken(in text: String) -> String? {
         let pats = [
+            #"voicedrop\.cn/i/([A-Za-z0-9]{6,16})"#,
+            #"jianshuo\.dev/voicedrop/i/([A-Za-z0-9]{6,16})"#,
             #"jianshuo\.dev/voicedrop/([A-Za-z0-9_-]{6,16})"#,
             #"voicedrop\.cn/([A-Za-z0-9_-]{6,16})"#,
         ]

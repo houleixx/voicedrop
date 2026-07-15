@@ -25,6 +25,8 @@ import SafariServices
 ///   https://voicedrop.cn/<分享id>             → .shareLink：问服务端这个 id 指向谁
 ///     （GET /files/api/link/<id>）——自己的文章开原生详情页，别人的分享/社区帖
 ///     开站内 Safari（页面本身就是完整阅读体验）
+///   https://voicedrop.cn/i/<邀请码>            → .invite：记归因（第 1 层）后落 App 主页
+///     ——已装用户点朋友的邀请链接不该看下载页；新装用户到不了这里（没装 App）。
 ///   https://jianshuo.dev/voicedrop/<token>    → 同上（老分享链接）
 ///   其余路径（/help/ 等）                      → .web：站内 Safari 兜底，绝不死链
 enum DeepLink: Equatable {
@@ -36,6 +38,7 @@ enum DeepLink: Equatable {
     case article(String)
     case shareLink(id: String, fallback: URL)
     case promptImport(code: String)
+    case invite(code: String)
     case web(URL)
 }
 
@@ -55,8 +58,9 @@ final class AppRouter: ObservableObject {
         if scheme == "https" || scheme == "http" {
             if let link = Self.universalLink(url) {
                 pending = link
-                // 邀请归因第 1 层：分享链接拉起 App = 确定归因（24h 内新装才实际生效）。
+                // 邀请归因第 1 层：分享/邀请链接拉起 App = 确定归因（24h 内新装才实际生效）。
                 if case .shareLink(let id, _) = link { ReferralManager.shared.noteShareToken(id) }
+                if case .invite(let code) = link { ReferralManager.shared.noteShareToken(code) }
             }
             return
         }
@@ -104,6 +108,11 @@ final class AppRouter: ObservableObject {
         // 所以窄的先判。jianshuo.dev/voicedrop/<7位码> 也有意在此识别，与服务端落地页路由对齐。
         if segs.count == 1, first.range(of: "^[1-9][0-9]{6}$", options: .regularExpression) != nil {
             return .promptImport(code: first)
+        }
+        // /i/<邀请码>（voicedrop.cn/i/… 与 jianshuo.dev/voicedrop/i/… 前缀归一后同形）。
+        if segs.count == 2, first == "i",
+           segs[1].range(of: "^[A-Za-z0-9]{6,16}$", options: .regularExpression) != nil {
+            return .invite(code: segs[1])
         }
         if segs.count == 1, first.range(of: "^[A-Za-z0-9_-]{6,16}$", options: .regularExpression) != nil {
             return .shareLink(id: first, fallback: url)

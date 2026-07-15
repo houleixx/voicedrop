@@ -270,7 +270,8 @@ struct LibraryView: View {
                 return
             }
             switch link {
-            case .recordings:
+            case .recordings, .invite:
+                // .invite：归因已在 AppRouter 记过（第 1 层），已装用户点邀请链接落主页即可。
                 tab = .recordings; selectedRec = nil; selectedPost = nil; showSettings = false; showUsage = false; sharedArticle = nil
                 Task { await refresh() }
             case .community:
