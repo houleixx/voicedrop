@@ -435,6 +435,8 @@ struct CommunityPostView: View {
     @State private var finishedReported = false
     @State private var showReportConfirm = false
     @State private var showBlockConfirm = false
+    @State private var importingPrompt = false
+    @State private var promptImported = false
 
     // Recording a response
     @State private var recorder = AudioRecorder()
@@ -472,6 +474,7 @@ struct CommunityPostView: View {
                             if articles.count > 1 { chipRow.padding(.top, 16) }
                             communityBody(a).padding(.top, articles.count > 1 ? 16 : 20)
                         }
+                        importPromptButton
                         repliesSection
                         Color.clear.frame(height: 1)
                             .onAppear {
@@ -660,6 +663,37 @@ struct CommunityPostView: View {
         (try? AttributedString(markdown: s, options: .init(
             interpretedSyntax: .inlineOnlyPreservingWhitespace,
             failurePolicy: .returnPartiallyParsedIfPossible))) ?? AttributedString(s)
+    }
+
+    // MARK: 提示词帖导入 CTA（仅提示词帖 + 非本人帖显示；文章帖零改动）
+
+    @ViewBuilder private var importPromptButton: some View {
+        if let code = full?.promptCode, full?.kind == "prompt", post.mine != true {
+            Button {
+                guard !importingPrompt else { return }
+                importingPrompt = true
+                Task {
+                    let r = await PromptStore.shared.importPrompt(code: code)
+                    importingPrompt = false
+                    switch r {
+                    case .success:
+                        promptImported = true
+                        showToast(String(localized: "已加入你的提示词"))
+                        Analytics.capture("社区提示词导入")
+                    case .failure(let err):
+                        showToast(err.message)
+                    }
+                }
+            } label: {
+                Label(promptImported ? String(localized: "已收下") : String(localized: "收下这条提示词"),
+                      systemImage: promptImported ? "checkmark" : "square.and.arrow.down")
+                    .font(.system(size: 15, weight: .semibold))
+                    .frame(maxWidth: .infinity).padding(.vertical, 12)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(importingPrompt || promptImported)
+            .padding(.top, 24)
+        }
     }
 
     // MARK: Article chips
