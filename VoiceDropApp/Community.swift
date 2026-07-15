@@ -66,10 +66,9 @@ final class CommunityStore {
     private var token: String { AuthStore.shared.bearer }
 
     /// Community WRITES (share / unshare) need an Apple-verified identity — the server
-    /// 403s a bare anon token. Send the session JWT when present; a missing one yields a
-    /// 403 the caller catches to trigger Sign in with Apple, then retries. Everything
-    /// else (incl. reco engage/rank, uploads, lists) uses `token` = the anon default.
-    private var shareToken: String { AuthStore.shared.session ?? token }
+    /// 403s a bare anon token. Everything else (incl. reco engage/rank, uploads, lists)
+    /// uses `token` = the anon default. 真源在 AuthStore.accountableBearer。
+    private var shareToken: String { AuthStore.shared.accountableBearer }
 
     /// shareIds the current user has liked — filled by `applyRanking()`, seeds the ❤️ state.
     var likedShareIds: Set<String> = []
@@ -104,6 +103,10 @@ final class CommunityStore {
         let count: Int?; let firstSharedAt: Double?; let updatedAt: Double?
         let replyTo: String?; let mine: Bool?
         let likes: Int?; let replies: Int?; let liked: Bool?
+        // ⚠️ 加字段三处同步：这里、下面 mapped 的 CommunityPost(...) 逐字段映射、
+        // CommunityPost 本身——feed 主路径不是直接解码 CommunityPost，漏映射 =
+        // 字段静默丢失（kind 曾漏掉 → 「提示词」tab 恒空，2026-07-16 真机 bug）。
+        let kind: String?
     }
 
     private func loadViaFeed() async -> Bool {
@@ -122,7 +125,7 @@ final class CommunityStore {
                               firstSharedAt: row.firstSharedAt, updatedAt: row.updatedAt,
                               count: row.count, mine: row.mine, replyTo: row.replyTo,
                               hasPhoto: row.hasPhoto, coverPhotoKey: row.coverPhotoKey,
-                              preview: row.preview)
+                              preview: row.preview, kind: row.kind)
             }
             timeOrdered = mapped                        // feed 本身就是时间倒序
             let byId = Dictionary(uniqueKeysWithValues: mapped.map { ($0.shareId, $0) })

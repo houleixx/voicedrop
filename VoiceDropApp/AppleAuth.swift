@@ -29,7 +29,20 @@ final class AuthStore {
     /// itself `users/anon-<hash>/` (auth/apple binds the Apple ID to this anon box), so
     /// anon and session resolve to the SAME user_sub. The session JWT (`session`) is sent
     /// ONLY where the server demands an Apple-verified identity: community share/unshare.
+    ///
+    /// ⚠️ 这不是登录证明——Apple 登录后它也不变。需要「可追责身份」门槛的写操作
+    /// （社区写、提示词分享等会被服务端 403 needs_apple_signin 的请求）必须用
+    /// `accountableBearer`，只送 bearer 会被拒且拉起登录也救不回（2026-07-16 真机踩过）。
     var bearer: String { anonToken }
+
+    /// 需要「可追责身份」的请求用这个：登录证明（session JWT）优先，未登录回退匿名
+    /// 密钥——服务端对匿名回 403 needs_apple_signin，由调用方拉起登录后重试（此时
+    /// session 已就位，本属性自动切换）。纯逻辑抽在 `accountableToken` 供单测锁定。
+    var accountableBearer: String { Self.accountableToken(session: session, anon: anonToken) }
+
+    nonisolated static func accountableToken(session: String?, anon: String) -> String {
+        session ?? anon
+    }
 
     /// The user-facing identity string — exactly the server's storage prefix
     /// (`users/<anonId>/`). Safe to show and share: it's a one-way hash of the

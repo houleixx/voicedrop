@@ -108,13 +108,6 @@ enum PromptLogic {
     ///   专属走 extractShareCode（服务端同款边界正则）。
     ///   - 匹配成功 → 返回抠出的码。
     ///   - 匹配失败 → 拒绝粘贴，保留原值（防止 "12345678" 闯入导入流程）。
-    /// 分享开关走社区门槛（分享 = 发社区帖），服务端只认 Apple/微信 session JWT——
-    /// anon key 即便属于已绑定 Apple 的账号也会 403 needs_apple_signin（服务端无从
-    /// 验证绑定，session 才是登录证明）。已登录时必须优先送 session；无 session 回退
-    /// anon key，让 403 → 拉起登录 → 重试的链路接管。与 CommunityStore.shareToken
-    /// （`session ?? token`）同构。其余提示词 API（读写树/导入/状态）继续用 anon key。
-    static func shareAuthToken(session: String?, anon: String) -> String { session ?? anon }
-
     static func mergeCodeInput(previous: String, incoming: String) -> String {
         // 无变化
         if incoming == previous { return incoming }
@@ -748,7 +741,8 @@ final class PromptStore {
             req = URLRequest(url: API.agentBase.appendingPathComponent("prompt-share").appendingPathComponent(id))
             req.httpMethod = "DELETE"
         }
-        req.setBearer(PromptLogic.shareAuthToken(session: AuthStore.shared.session, anon: token))
+        // 分享 = 发社区帖，走可追责身份门槛；其余提示词 API（读写树/导入/状态）仍用 token。
+        req.setBearer(AuthStore.shared.accountableBearer)
         guard let (data, resp) = try? await URLSession.shared.data(for: req) else {
             return (String(localized: "网络出错，请重试"), false)
         }
@@ -756,13 +750,23 @@ final class PromptStore {
             Analytics.capture("提示词分享开关", ["开": on])
             return (nil, false)
         }
-        if resp.httpStatusCode == 403,
-           (try? JSONDecoder().decode([String: String].self, from: data))?["error"] == "needs_apple_signin" {
+        let code = (try? JSONDecoder().decode([String: String].self, from: data))?["error"]
+        if resp.httpStatusCode == 403, code == "needs_apple_signin" {
             return (nil, true)
         }
-        return (resp.httpStatusCode == 429
-            ? String(localized: "今天生成分享码的次数已达上限，明天再试")
-            : String(localized: "操作失败，请重试"), false)
+        // 把服务端的真实拒因翻成人话——笼统的「操作失败」掩盖过一次真机排障
+        //（2026-07-16：413/审核/401 全被它吃掉，只能靠捞服务端数据反推）。
+        let message: String
+        switch (resp.httpStatusCode, code) {
+        case (429, _):                  message = String(localized: "今天生成分享码的次数已达上限，明天再试")
+        case (403, "content_flagged"):  message = String(localized: "内容未通过社区审核，无法分享")
+        case (413, _):                  message = String(localized: "提示词太长（上限 4000 字），精简后再分享")
+        case (404, _):                  message = String(localized: "这条提示词还没同步到服务器，保存后再试")
+        case (401, _):                  message = String(localized: "登录状态已失效，请重新打开 App 再试")
+        case (503, _):                  message = String(localized: "分享功能暂时关闭，稍后再试")
+        default:                        message = String(localized: "操作失败，请重试")
+        }
+        return (message, false)
     }
 
     /// 过滤结果 → ConfigMenu 现有输入形状（长按菜单直接吃）。
