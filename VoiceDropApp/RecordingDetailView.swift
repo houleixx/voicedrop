@@ -855,7 +855,7 @@ struct RecordingDetailView: View {
             lpMenu = LongpressPresentation(
                 anchor: .text(text), frame: frame, menu: menu,
                 fill: { UIMenuConfig.fill($0, ["LINE": String(line), "QUOTE": Self.quotePrefix(text)]) },
-                onPick: { agent.enqueue($0, articleIndex: articleIndex) },
+                onPick: { agent.enqueue($0, articleIndex: articleIndex, anchor: .line(line, text: text)) },
                 localRows: [
                     LongpressLocalRow(label: String(localized: "拷贝"), systemImage: "doc.on.doc",
                                       action: { UIPasteboard.general.string = text }),
@@ -924,7 +924,7 @@ struct RecordingDetailView: View {
             lpMenu = LongpressPresentation(
                 anchor: .image(img), frame: frame, menu: menu,
                 fill: { UIMenuConfig.fill($0, ["KEY": relKey]) },
-                onPick: { agent.enqueue($0, articleIndex: articleIndex) }
+                onPick: { agent.enqueue($0, articleIndex: articleIndex, anchor: .image(key: relKey)) }
             )
         }
     }
