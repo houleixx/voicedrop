@@ -475,7 +475,11 @@ struct CommunityPostView: View {
                             .padding(.top, 8)
                             if let orig = replyToFull { replyToChip(orig).padding(.top, 10) }
                             if articles.count > 1 { chipRow.padding(.top, 16) }
-                            communityBody(a).padding(.top, articles.count > 1 ? 16 : 20)
+                            if full?.kind == "prompt" {
+                                promptSection(a).padding(.top, 20)
+                            } else {
+                                communityBody(a).padding(.top, articles.count > 1 ? 16 : 20)
+                            }
                         }
                         importPromptButton
                         repliesSection
@@ -669,6 +673,41 @@ struct CommunityPostView: View {
     }
 
     // MARK: 提示词帖导入 CTA（仅提示词帖 + 非本人帖显示；文章帖零改动）
+
+    /// 提示词帖的详情形态——对齐 voicedrop.cn/<码> 落地页（分享码 + 内容盒 + 怎么用），
+    /// 不再用文章兼容形状裸渲染（那是给老版本 App 的降级，不是新版的展示）。
+    @ViewBuilder private func promptSection(_ a: MinedArticle) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            if let code = full?.promptCode {
+                VStack(spacing: 6) {
+                    Text("一条 VoiceDrop 提示词 · 分享码")
+                        .font(.system(size: 13)).foregroundStyle(Theme.metaRead)
+                    Text(code)
+                        .font(.system(size: 38, weight: .semibold, design: .monospaced))
+                        .tracking(6).foregroundStyle(Theme.inkRead)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+            }
+            Text(a.body)
+                .font(.system(size: 16)).foregroundStyle(Theme.inkRead)
+                .lineSpacing(7).fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(14)
+                .background(RoundedRectangle(cornerRadius: 12).fill(Theme.ink.opacity(0.05)))
+            VStack(alignment: .leading, spacing: 8) {
+                Text("怎么用").font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.inkRead)
+                if let code = full?.promptCode {
+                    Text("在任意文章里长按屏幕按住说话，说「用 \(code) 改这段」——AI 按这条提示词干活，只管这一次，不改你的设置。")
+                        .font(.system(size: 14)).foregroundStyle(Theme.secondary).lineSpacing(5)
+                }
+                Text(post.mine == true
+                     ? "这是你分享的提示词。把分享码发给朋友，或在 设置 → 提示词 里管理。"
+                     : "想长期用：点下面「收下这条提示词」，之后长按菜单里随手可用。")
+                    .font(.system(size: 14)).foregroundStyle(Theme.secondary).lineSpacing(5)
+            }
+        }
+    }
 
     @ViewBuilder private var importPromptButton: some View {
         if let code = full?.promptCode, full?.kind == "prompt", post.mine != true {
