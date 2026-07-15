@@ -378,8 +378,10 @@ struct PromptEditView: View {
     private func toggleSharing(_ on: Bool) async {
         shareToggling = true; shareError = nil
         shareError = await store.setSharing(id: currentID, on: on)
-        shareToggling = false
+        // 先把新状态拉回来、再放开 toggle——顺序反了会闪烁：toggle 恢复瞬间读到的
+        // 还是旧 shareStates（未选中），随后刷新才跳回选中（2026-07-16 真机 bug）。
         await refreshShareStates()
+        shareToggling = false
     }
 
     /// fork 保存后分享码在服务端被 re-key 到新 id（Task 1），每次 save 后都要重新拉
