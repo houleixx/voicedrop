@@ -108,6 +108,13 @@ enum PromptLogic {
     ///   专属走 extractShareCode（服务端同款边界正则）。
     ///   - 匹配成功 → 返回抠出的码。
     ///   - 匹配失败 → 拒绝粘贴，保留原值（防止 "12345678" 闯入导入流程）。
+    /// 分享开关走社区门槛（分享 = 发社区帖），服务端只认 Apple/微信 session JWT——
+    /// anon key 即便属于已绑定 Apple 的账号也会 403 needs_apple_signin（服务端无从
+    /// 验证绑定，session 才是登录证明）。已登录时必须优先送 session；无 session 回退
+    /// anon key，让 403 → 拉起登录 → 重试的链路接管。与 CommunityStore.shareToken
+    /// （`session ?? token`）同构。其余提示词 API（读写树/导入/状态）继续用 anon key。
+    static func shareAuthToken(session: String?, anon: String) -> String { session ?? anon }
+
     static func mergeCodeInput(previous: String, incoming: String) -> String {
         // 无变化
         if incoming == previous { return incoming }
@@ -741,7 +748,7 @@ final class PromptStore {
             req = URLRequest(url: API.agentBase.appendingPathComponent("prompt-share").appendingPathComponent(id))
             req.httpMethod = "DELETE"
         }
-        req.setBearer(token)
+        req.setBearer(PromptLogic.shareAuthToken(session: AuthStore.shared.session, anon: token))
         guard let (data, resp) = try? await URLSession.shared.data(for: req) else {
             return (String(localized: "网络出错，请重试"), false)
         }

@@ -774,4 +774,15 @@ final class PromptStoreTests: XCTestCase {
         let result = PromptLogic.mergeCodeInput(previous: "", incoming: "482 0135")
         XCTAssertEqual(result, "", "paste with spaces should be rejected per boundary rules")
     }
+
+    /// 分享走社区门槛：已 Apple 登录时必须送 session JWT（anon key 会被服务端
+    /// 403 needs_apple_signin，即便账号已绑定——真机 bug 2026-07-16）。
+    func testShareAuthTokenPrefersSession() {
+        XCTAssertEqual(PromptLogic.shareAuthToken(session: "sess.jwt", anon: "anon_key"), "sess.jwt")
+    }
+
+    /// 未登录（无 session）回退 anon key——服务端 403 后走拉起登录的重试链路。
+    func testShareAuthTokenFallsBackToAnon() {
+        XCTAssertEqual(PromptLogic.shareAuthToken(session: nil, anon: "anon_key"), "anon_key")
+    }
 }
