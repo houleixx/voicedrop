@@ -1,3 +1,5 @@
 What's new:
-• Performance and stability improvements
-• Small polish throughout
+• Invite friends: share your personal link from Settings — you both earn compute credits when they join
+• Prompt community: share your favorite prompts and import ones from others with a tap
+• Smarter long-press: point at exact text or images in your article when giving edit instructions
+• Notifications now open your credits bill directly, plus performance and stability improvements
