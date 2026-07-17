@@ -23,8 +23,10 @@ spec = jianshuo.dev repo `docs/superpowers/specs/2026-06-30-voicedrop-subscripti
   订阅卡从「即将上线」换成真购买（价格用 product.displayPrice，未加载时字面 ¥19.9；
   订阅中显示续费日 + 管理订阅 manageSubscriptionsSheet；未订阅显示购买键 + 恢复购买 +
   自动续期披露 + 隐私/协议链接——审核必需）。App 启动挂 `StoreService.shared.start()`
-  （VoiceDropApp.swift）。产品 ID = `com.wangjianshuo.VoiceDrop.sub.monthly`（服务端
-  `usage.js SUB_PRODUCT_MONTHLY` 同一字符串，改要两边同步）。
+  （VoiceDropApp.swift）。产品 ID = `com.wangjianshuo.VoiceDrop.sub.monthly_19_9`——**ID 里
+  写死价格（人民币主档记号），以后加档（¥49.9 之类）= 新 ID**：服务端 `usage.js
+  SUB_PRODUCTS`（产品 ID → 每月算力）加一行 + ASC 建同名产品 + iOS 加档位；各国售价
+  在 ASC 按店面单独定，界面价格永远用 `product.displayPrice`（自动本地货币）。
 - **⚠️ 上线前的 App Store Connect 手工步骤（代码做不了，做完才能真买）**：
   ① 功能 → App 内购买 → 新建**自动续期订阅**：产品 ID 就是上面那个，新建订阅群组
   （如「VoiceDrop 会员」），时长 1 个月，价格选最接近 ¥19.9 的价位点，中文显示名+描述；

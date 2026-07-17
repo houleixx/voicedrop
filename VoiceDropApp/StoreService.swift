@@ -9,7 +9,10 @@ import StoreKit
 @MainActor
 final class StoreService: ObservableObject {
     static let shared = StoreService()
-    static let monthlyID = "com.wangjianshuo.VoiceDrop.sub.monthly"
+    /// 产品 ID 里写死价格（monthly_19_9 = ¥19.9/月主档）——以后加档（如 49_9）是新 ID，
+    /// 服务端按档位表（usage.js SUB_PRODUCTS）发放对应算力。各国售价在 ASC 按店面定，
+    /// ID 只是内部档位记号；界面价格永远用 product.displayPrice（自动本地货币）。
+    static let monthlyID = "com.wangjianshuo.VoiceDrop.sub.monthly_19_9"
 
     @Published var product: Product?
     @Published var active = false
