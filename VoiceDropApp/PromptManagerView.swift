@@ -1,4 +1,5 @@
 import SwiftUI
+import PostHog
 import UIKit
 
 // 设置 → 提示词（5a）：Prompt Manager 重构 Phase 2 的新列表页，替换旧的 InstructionSettingsView
@@ -136,6 +137,7 @@ struct PromptManagerView: View {
         }
         .overlay(alignment: .bottom) { toastView }
         .toolbar(.hidden, for: .navigationBar)
+        .postHogMask()   // 隐私红线：提示词（指令文本）不进 session replay 截屏
         .onAppear { Analytics.screen("提示词管理") }
         .task { await store.refresh() }
         .confirmationDialog(deleteDialogTitle, isPresented: deleteDialogBinding, titleVisibility: .visible) {

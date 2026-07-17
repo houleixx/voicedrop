@@ -11,6 +11,14 @@ enum Analytics {
         guard let key = Bundle.main.object(forInfoDictionaryKey: "PostHogAPIKey") as? String,
               key.hasPrefix("phc_") else { return }
         let config = PostHogConfig(apiKey: key, host: "https://us.i.posthog.com")
+        // Session replay（截屏式录屏，用于定位 rageclick 等 UX 卡点）。
+        // 隐私红线的延伸约定：遮罩全开——文本输入、图片一律打码；
+        // SwiftUI 是截屏模式，屏上静态文本（转写/文章）仍可能入镜，
+        // 内容型视图需在视图侧加 .postHogMask()（见 ArticleView/TranscriptView）。
+        config.sessionReplay = true
+        config.sessionReplayConfig.screenshotMode = true      // SwiftUI 必须
+        config.sessionReplayConfig.maskAllTextInputs = true
+        config.sessionReplayConfig.maskAllImages = true
         #if DEBUG
         config.debug = true   // Xcode console 打印每条事件的捕获/上送日志
         #endif

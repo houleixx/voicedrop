@@ -1,4 +1,5 @@
 import SwiftUI
+import PostHog
 import UIKit
 import Photos
 import PhotosUI
@@ -169,6 +170,7 @@ struct RecordingDetailView: View {
                 pending
             } else {
                 articlePane
+                    .postHogMask()   // 隐私红线：文章正文/转写不进 session replay 截屏
             }
         }
         .blur(radius: lpMenu == nil ? 0 : 3)   // 长按菜单出现时正文压暗模糊（设计稿 2a）

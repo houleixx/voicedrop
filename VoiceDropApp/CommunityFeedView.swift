@@ -1,4 +1,5 @@
 import SwiftUI
+import PostHog
 
 /// VD社区双排瀑布流（design_handoff_community_feed 方向 1a，2026-07-13）。
 /// 小红书式混排：照片帖用图封面（高度随原图宽高比 → 瀑布错落），纯文字帖用
@@ -44,6 +45,7 @@ struct CommunityFeedView: View {
             }
         }
         .background(Self.pageBG)
+        .postHogMask()   // 隐私红线：社区文章内容不进 session replay 截屏
         .onAppear { Analytics.screen("社区") }
     }
 
