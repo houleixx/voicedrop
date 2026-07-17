@@ -31,7 +31,8 @@ struct UsageView: View {
     @State private var nextCursor: String? = nil        // 明细翻页游标；nil = 没有更早的了
     @State private var loadingMore = false
     @State private var loaded = false
-    @State private var showSubAlert = false
+    @State private var showManageSubs = false
+    @ObservedObject private var store = StoreService.shared
     private var token: String { AuthStore.shared.bearer }
 
     /// granted = balance + spent (balance = 累计获赠 − 已用), exact from the two numbers.
@@ -55,12 +56,8 @@ struct UsageView: View {
         .background(Theme.appBG.ignoresSafeArea())
         .navigationTitle("算力")
         .navigationBarTitleDisplayMode(.inline)
-        .task { await load() }
-        .alert("包月订阅即将上线", isPresented: $showSubAlert) {
-            Button("好") {}
-        } message: {
-            Text("包月算力还在开发中，敬请期待。现在的算力来自注册与活动赠送，足够日常使用。")
-        }
+        .task { await load(); await store.refresh() }
+        .manageSubscriptionsSheet(isPresented: $showManageSubs)
     }
 
     // MARK: 余额 hero（深色渐变）
@@ -87,7 +84,7 @@ struct UsageView: View {
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
-    // MARK: 包月订阅卡（即将上线）
+    // MARK: 包月订阅卡（StoreKit 2，¥19.9/月 → 每月 200 算力）
 
     private var subscriptionCard: some View {
         VStack(spacing: 13) {
@@ -95,26 +92,71 @@ struct UsageView: View {
                 settingsTile(Theme.amberSoft, "bolt.fill", Theme.amber)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("包月算力").font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.ink)
-                    Text("每月 200 算力 · 月底清零 · 随时可取消")
+                    Text(store.active ? String(localized: "订阅中 · 每月自动充入 200 算力") : String(localized: "每月 200 算力 · 月底清零 · 随时可取消"))
                         .font(.system(size: 12.5)).foregroundStyle(Theme.secondary)
                 }
                 Spacer(minLength: 8)
                 HStack(alignment: .firstTextBaseline, spacing: 1) {
-                    Text("¥19.9").font(.system(size: 20, weight: .bold)).foregroundStyle(Theme.ink)
+                    Text(store.product?.displayPrice ?? "¥19.9").font(.system(size: 20, weight: .bold)).foregroundStyle(Theme.ink)
                     Text("/月").font(.system(size: 12)).foregroundStyle(Theme.secondary)
                 }
             }
-            Button { showSubAlert = true } label: {
-                Text("包月订阅 · 即将上线")
+            if store.active {
+                if let d = store.expiresDate {
+                    Text("将于 \(DateFormatter.zh("M月d日").string(from: d)) 续费，可随时取消")
+                        .font(.system(size: 12.5)).foregroundStyle(Theme.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                Button { showManageSubs = true } label: {
+                    Text("管理订阅")
+                        .font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.ink)
+                        .frame(maxWidth: .infinity).padding(.vertical, 12)
+                        .background(Theme.amberSoft, in: RoundedRectangle(cornerRadius: 9))
+                }
+                .buttonStyle(.plain)
+            } else {
+                Button {
+                    Task { await store.purchase(); await load() }
+                } label: {
+                    HStack(spacing: 8) {
+                        if store.purchasing { ProgressView().controlSize(.small).tint(.white) }
+                        Text(store.purchasing ? String(localized: "购买中…") : String(localized: "订阅包月算力"))
+                    }
                     .font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
                     .frame(maxWidth: .infinity).padding(.vertical, 12)
-                    .background(Theme.amber.opacity(0.55), in: RoundedRectangle(cornerRadius: 9))
+                    .background(Theme.amber, in: RoundedRectangle(cornerRadius: 9))
+                }
+                .buttonStyle(.plain)
+                .disabled(store.purchasing)
+                if let err = store.lastError {
+                    Text(err).font(.system(size: 12.5)).foregroundStyle(Theme.accent)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                subscriptionFootnote
             }
-            .buttonStyle(.plain)
         }
         .padding(16)
         .background(Theme.card, in: RoundedRectangle(cornerRadius: 11))
         .overlay(RoundedRectangle(cornerRadius: 11).stroke(Color(hex: "EBD9B8"), lineWidth: 1))
+    }
+
+    /// 审核要求的自动续期披露 + 恢复购买 + 协议/隐私链接。
+    private var subscriptionFootnote: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("订阅按月自动续费，到期前 24 小时自动从 Apple ID 扣款，可随时在系统「订阅」设置中取消。")
+                .font(.system(size: 11.5)).foregroundStyle(Theme.faint)
+            HStack(spacing: 14) {
+                Button { Task { await store.restore(); await load() } } label: {
+                    Text("恢复购买").font(.system(size: 12)).foregroundStyle(Theme.secondary)
+                }
+                .buttonStyle(.plain)
+                Link(String(localized: "隐私政策"), destination: URL(string: "https://jianshuo.dev/voicedrop/privacy/")!)
+                    .font(.system(size: 12)).foregroundStyle(Theme.secondary)
+                Link(String(localized: "用户协议"), destination: URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!)
+                    .font(.system(size: 12)).foregroundStyle(Theme.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: 算力来源 / 花费总结（/usage/summary 全量聚合——以前在拉到的 50 条明细里

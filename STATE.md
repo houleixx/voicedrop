@@ -1,6 +1,43 @@
 # VoiceDrop — project state (read this first)
 
-Last updated: 2026-07-16（「收下这条提示词」幂等 + 邀请好友入口上线）
+Last updated: 2026-07-17（苹果订阅 P3+P4：¥19.9/月 → 每月 200 算力）
+
+## 苹果订阅（2026-07-17，服务端已部署冒烟，iOS 已合 main；⚠️ 需 ASC 手工建产品才能真买）
+
+spec = jianshuo.dev repo `docs/superpowers/specs/2026-06-30-voicedrop-subscription-credits-design.md`
+（当年 P1 分桶/P2 活动赠送已上线，这次补 P3 服务端 + P4 iOS），plan 同 repo
+`docs/superpowers/plans/2026-07-17-voicedrop-subscription-p3p4.md`。
+¥19.9/月 → 每月 200 算力，桶过期 = 苹果周期末 + 6h 宽限 → 月清零（不滚存）。
+
+- **服务端**（jianshuo.dev repo，worker 5ccd8737 已部署，D1 migration 0004 已 apply）：
+  `agent/src/iap.js` 三端点——`POST /agent/iap/claim`（客户端回传 transaction_id）、
+  `POST /agent/iap/notifications`（ASN V2 webhook，DID_RENEW 自动续账/REFUND 清零桶）、
+  `GET /agent/iap/status`。**信任模型 = 全部回查 App Store Server API**（生产 404 →
+  sandbox 兜底），不做本地 JWS 链验签——伪造 id/通知在回查一步死掉。worker secrets
+  `ASC_API_KEY_ID/ASC_API_ISSUER_ID/ASC_API_KEY_CONTENT`（与 fastlane 同一把 key，已 put）。
+  绑定 first-claim-wins（`iap_sub`，换账号 claim 同一订阅 409）；幂等键 = `iap_txn.transaction_id`
+  （每月续费一个新 id → 月月各发一桶）。测试 18 例（`agent/test/iap.test.js`），全量 1154 绿。
+  线上冒烟：status 200 / 假交易 claim 走真苹果 API 回 not-found（证明 JWT key 有效）。
+- **iOS**：`StoreService.swift`（StoreKit 2：purchase / Transaction.updates 监听 /
+  启动 currentEntitlements 逐笔 claim 兜底——服务端幂等所以随便重放）；`UsageView`
+  订阅卡从「即将上线」换成真购买（价格用 product.displayPrice，未加载时字面 ¥19.9；
+  订阅中显示续费日 + 管理订阅 manageSubscriptionsSheet；未订阅显示购买键 + 恢复购买 +
+  自动续期披露 + 隐私/协议链接——审核必需）。App 启动挂 `StoreService.shared.start()`
+  （VoiceDropApp.swift）。产品 ID = `com.wangjianshuo.VoiceDrop.sub.monthly`（服务端
+  `usage.js SUB_PRODUCT_MONTHLY` 同一字符串，改要两边同步）。
+- **⚠️ 上线前的 App Store Connect 手工步骤（代码做不了，做完才能真买）**：
+  ① 功能 → App 内购买 → 新建**自动续期订阅**：产品 ID 就是上面那个，新建订阅群组
+  （如「VoiceDrop 会员」），时长 1 个月，价格选最接近 ¥19.9 的价位点，中文显示名+描述；
+  ② App 信息 → App Store 服务器通知 → **V2**，生产+沙盒 URL 都填
+  `https://jianshuo.dev/agent/iap/notifications`；
+  ③ 首个订阅必须随下一个 App 版本一起提审（审核备注里说明订阅内容）。
+- **真机手测清单（发 TestFlight + ASC 产品建好后）**：① 算力页出订阅卡、价格显示
+  ASC 价位 ② 沙盒账号购买成功 → 算力 +200、明细出「包月发放」 ③ 重启 App 不重复发
+  ④ status 显示订阅中+续费日 ⑤ 沙盒加速续费（~5 分钟一个月）→ 自动 +200（ASN 主路）
+  ⑥ 恢复购买在重装后能找回订阅 ⑦ 退款测试（沙盒退款 → 桶清零）。
+- 已知边界（有意）：订阅奖励记在 anon scope（与所有算力同口径，Apple 登录不换 scope）；
+  sandbox 交易也发真算力（自家 TestFlight 测试用，量小可控，ledger detail 带 env 可查）；
+  退款只清剩余不追回已花；安卓无支付通道（苹果 only，spec §13）。
 
 ## 「收下这条提示词」幂等（2026-07-16 深夜，服务端已部署 worker 6e1b4cab，iOS 已合 main 未发 TestFlight）
 

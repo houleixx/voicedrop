@@ -12,6 +12,9 @@ struct VoiceDropApp: App {
         WindowGroup {
             RootView()
                 .environmentObject(router)
+                // 订阅：挂 Transaction.updates 监听 + 把当前有效订阅逐笔 claim
+                // （服务端幂等）——续费到账不依赖用户打开算力页。
+                .task { StoreService.shared.start() }
                 .onOpenURL { router.handle($0) }   // voicedrop://<page> + universal links — see AppRouter/DeepLink
                 #if DEBUG
                 // Simulator screenshot rig: SIMCTL_CHILD_VD_OPEN_URL=voicedrop://…
