@@ -77,7 +77,7 @@ targets:
     settings:
       base:
         SWIFT_VERSION: "6.0"
-        MARKETING_VERSION: "1.5"
+        MARKETING_VERSION: "1.6"
         CURRENT_PROJECT_VERSION: "1"
         PRODUCT_BUNDLE_IDENTIFIER: com.wangjianshuo.VoiceDrop
         DEVELOPMENT_TEAM: 97XBW2A43H
@@ -128,7 +128,7 @@ targets:
     settings:
       base:
         SWIFT_VERSION: "6.0"
-        MARKETING_VERSION: "1.5"
+        MARKETING_VERSION: "1.6"
         CURRENT_PROJECT_VERSION: "1"
         PRODUCT_BUNDLE_IDENTIFIER: com.wangjianshuo.VoiceDrop.Share
         DEVELOPMENT_TEAM: 97XBW2A43H

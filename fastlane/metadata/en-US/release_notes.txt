@@ -1,5 +1,5 @@
 What's new:
-• Invite friends: share your personal link from Settings — you both earn compute credits when they join
-• Prompt community: share your favorite prompts and import ones from others with a tap
-• Smarter long-press: point at exact text or images in your article when giving edit instructions
-• Notifications now open your credits bill directly, plus performance and stability improvements
+• Easier WeChat account linking: AppID/AppSecret and IP allowlist are verified on save, with clear errors and a rewritten step-by-step guide
+• AI images carry their provenance: pictures generated from long-press menu edits now embed creation info and the prompt share code, so anyone with the image can find the same prompt
+• Prompt manager fixes: importing a prompt is now idempotent, empty delete dialogs are gone, and swipe-to-delete feels right
+• Performance and stability improvements
