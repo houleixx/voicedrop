@@ -1,6 +1,32 @@
 # VoiceDrop — project state (read this first)
 
-Last updated: 2026-07-19（提示词保存提速 + 删除弹框/左滑修复）
+Last updated: 2026-07-21（采访 OpenAI 额度耗尽报警 + iOS 停重连风暴）
+
+## 采访「从国内连不上」根因 = OpenAI 额度耗尽，非跨境（2026-07-21，已部署）
+
+排查坐实：realtime relay close 日志 `source:"openai" code:1013 reason:"insufficient_quota"`
+——采访是 OpenAI **账户额度/配额耗尽**把会话秒关，**对所有地区都坏、与 GFW/香港无关**。
+跨境腿本身是好的（`relay open` 能打出即握手成功，含香港 geo-block 的 ENAM 中继兜底）。
+误判成「中国网络」是因为历史上确有跨境断连旧账。**该次 outage 已于 07-21 ~09:39 UTC
+自行恢复**（额度补上/计费窗口重置），探针 `session.created` 成功、近 90min 无 quota close。
+
+改动（下次再发生时自动生效）：
+- **服务端**（jianshuo.dev/agent，worker 已 deploy version 0c3e37a0）：
+  - `push.js` 新增 `alertAdminThrottled(env, ruleKey, windowMs, msg, push=sendPush)`：给
+    `env.ADMIN_SCOPE` 推「重要失败」，同 ruleKey **60 分钟只推一次**（marker 存 R2
+    `ops/alerts/<key>.json`——报警从一次性中继 DO 发出，跨会话去重靠 R2 共享真源）。
+  - `realtime.js` closeBoth：`source==="openai"` 且 reason 命中 `OPENAI_FATAL_RE`
+    (`insufficient_quota|billing|exceeded_current_quota|account_deactivated`) → 报警，
+    `ctx.waitUntil` 后台发、绝不阻塞/抛。`test/push-alert.test.js` 覆盖，全量 1237 绿。
+  - ⚠️ 未活体验证的一环：`ADMIN_SCOPE` 指向的管理员 scope 是否已注册 push token
+    （故障当时不复现，无法真触发一次推送坐实）。同 scope 已被 miner-fail / voicedrop.cn
+    探活报警复用，且 APNs prod 通路本身验证可用（文章推送成功）。
+- **iOS**（voicedrop，已 push main→TestFlight CI，build 已过）：`RealtimeSession` 加
+  `.unavailable` 终态识别硬拒绝（error 事件 or close 1013/quota），`RealtimeInterviewer`
+  不再重连、停上行 tee，录音界面提示「AI 采访暂不可用 · 录音继续」。修掉了 `connect()`
+  同步置 `.live` 清零 reconnectAttempt 导致「6 次上限」永不触发的无限重连风暴。
+
+## 提示词保存提速：分享同步挪后台（2026-07-19，纯服务端已上线并线上验证）
 
 ## 提示词保存提速：分享同步挪后台（2026-07-19，纯服务端已上线并线上验证）
 
