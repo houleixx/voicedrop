@@ -203,7 +203,7 @@ struct PromptManagerView: View {
     private var introText: String {
         reordering
             ? String(localized: "拖 ≡ 手柄调顺序；拖到 folder 标题收进去。")
-            : String(localized: "一套指令，长按文字或图片时按『适用于』自动筛选。改过的系统项标『已自定义』，自己建的标『自建』。")
+            : String(localized: "一套指令，长按文字或图片时按『适用于』自动筛选。改过的系统项标『已自定义』，自己建的标『自建』，收下别人分享的标『导入』。")
     }
 
     private func addGroup(named name: String) async {
@@ -405,7 +405,7 @@ struct PromptManagerView: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
                     Text(node.label).font(.system(size: 15)).foregroundStyle(Theme.ink)
-                    originBadge(node.origin)
+                    originBadge(node)
                 }
                 AppliesToBadges(appliesTo: node.appliesTo ?? [])
             }
@@ -440,7 +440,7 @@ struct PromptManagerView: View {
             iconTile(bg: Theme.tileNeutral, symbol: "folder", fg: Theme.secondary)
             HStack(spacing: 6) {
                 Text(node.label).font(.system(size: 15)).foregroundStyle(Theme.ink)
-                originBadge(node.origin)
+                originBadge(node)
                 Text("分组 · \(node.children?.count ?? 0) 项")
                     .font(.system(size: 12)).foregroundStyle(Theme.sectionLabel)
             }
@@ -1016,11 +1016,16 @@ struct PromptManagerView: View {
                   cornerRadius: cornerRadius)
     }
 
-    @ViewBuilder private func originBadge(_ origin: String) -> some View {
-        switch origin {
-        case "custom": badge(String(localized: "已自定义"), fg: Theme.amber, bg: Theme.amberSoft, weight: .semibold)
-        case "user": badge(String(localized: "自建"), fg: Theme.greenDone, bg: Theme.okBannerBG, weight: .semibold)
-        default: EmptyView() // system 是常态，不画标
+    @ViewBuilder private func originBadge(_ node: PromptNode) -> some View {
+        if node.importedFrom != nil {
+            // 从分享码收下来的条目 origin 也是 "user"，但对用户来说它是「导入」不是「自建」。
+            badge(String(localized: "导入"), fg: Theme.accent, bg: Theme.accentSoft, weight: .semibold)
+        } else {
+            switch node.origin {
+            case "custom": badge(String(localized: "已自定义"), fg: Theme.amber, bg: Theme.amberSoft, weight: .semibold)
+            case "user": badge(String(localized: "自建"), fg: Theme.greenDone, bg: Theme.okBannerBG, weight: .semibold)
+            default: EmptyView() // system 是常态，不画标
+            }
         }
     }
 
