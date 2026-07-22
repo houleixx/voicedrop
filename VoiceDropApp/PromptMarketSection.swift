@@ -33,17 +33,38 @@ struct MarketExample: Decodable, Equatable {
     let source: String?
 }
 
+enum MarketFilter: String, CaseIterable {
+    case hot, new, text, image
+    var title: String {
+        switch self {
+        case .hot: return String(localized: "热门")
+        case .new: return String(localized: "最新")
+        case .text: return String(localized: "文字")
+        case .image: return String(localized: "配图")
+        }
+    }
+    var query: String {
+        switch self {
+        case .hot: return "sort=hot"
+        case .new: return "sort=new"
+        case .text: return "sort=hot&scope=text"
+        case .image: return "sort=hot&scope=image"
+        }
+    }
+}
+
 @MainActor
 @Observable
 final class PromptMarketModel {
     var items: [MarketItem] = []
     var loading = false
     var failed = false
+    var filter: MarketFilter = .hot
 
     func load() async {
         loading = items.isEmpty
         failed = false
-        var req = URLRequest(url: URL(string: "\(API.agentBase.absoluteString)/prompt-market?sort=hot&limit=30")!)
+        var req = URLRequest(url: URL(string: "\(API.agentBase.absoluteString)/prompt-market?\(filter.query)&limit=30")!)
         req.setBearer(AuthStore.shared.bearer)
         struct R: Decodable { let items: [MarketItem] }
         if let (data, resp) = try? await URLSession.shared.data(for: req), resp.isOK,
@@ -71,9 +92,11 @@ struct PromptMarketSection: View {
             Text("社区热门")
                 .font(.system(size: 12.5, weight: .medium)).foregroundStyle(Theme.sectionLabel)
                 .padding(.leading, 4)
+            chipRow
             content
         }
         .task { await model.load() }
+        .onChange(of: model.filter) { _, _ in Task { await model.load() } }
         .sheet(item: $detail) { item in
             PromptMarketDetailView(item: item, store: store,
                                    imported: PromptLogic.containsImport(code: item.code, in: store.items)) { newID in
@@ -82,6 +105,30 @@ struct PromptMarketSection: View {
                 Task { await model.load() }
             }
         }
+    }
+
+    private var chipRow: some View {
+        HStack(spacing: 8) {
+            ForEach(MarketFilter.allCases, id: \.self) { f in
+                Button {
+                    model.filter = f
+                } label: {
+                    Text(f.title)
+                        .font(.system(size: 12.5, weight: .medium))
+                        .foregroundStyle(model.filter == f ? .white : Theme.bodyInk)
+                        .padding(.horizontal, 13).padding(.vertical, 6)
+                        .background(
+                            Capsule().fill(model.filter == f ? Color(hex: "2B2823") : Color.white)
+                        )
+                        .overlay(
+                            Capsule().stroke(model.filter == f ? Color.clear : Color(hex: "E5DCCB"), lineWidth: 1)
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+            Spacer()
+        }
+        .padding(.leading, 4)
     }
 
     @ViewBuilder
